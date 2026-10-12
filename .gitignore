@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+# output generati da run_tests.py
+risultati_test.csv
+riepilogo_test.csv
+dati_simulati/
+.pytest_cache/
