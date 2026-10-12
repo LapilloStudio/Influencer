@@ -87,6 +87,20 @@ def test_file_sbagliato_errore_chiaro():
     assert "Excel" in at.error[0].value
 
 
+def test_errore_imprevisto_in_italiano(monkeypatch):
+    import creatorlift.io_shopify as io_s
+
+    def boom(*a, **k):
+        raise RuntimeError("something broke")
+    monkeypatch.setattr(io_s, "load_shopify", boom)
+    at = AppTest.from_file(APP, default_timeout=TIMEOUT).run()
+    at.file_uploader(key="ordini").set_value([("ordini.csv", b"x", "text/csv")])
+    at.file_uploader(key="post").set_value(("post.csv", b"x", "text/csv")).run()
+    next(b for b in at.button if b.label == "Analizza").click().run()
+    assert not at.exception
+    assert "Non sono riuscito a leggere i file" in at.error[0].value
+
+
 def test_privacy_controllata(monkeypatch):
     from creatorlift.privacy import problems
     ok = {"browser.gatherUsageStats": False, "server.showEmailPrompt": False, "server.enableCORS": True,

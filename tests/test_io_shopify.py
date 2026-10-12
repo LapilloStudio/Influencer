@@ -177,14 +177,14 @@ def test_codice_condiviso_e_post_vicini():
     assert with_code == {"giulia": 2, "sara": 2}
     testi = " ".join(a.testo for a in avvisi)
     assert "assegnato a piu' creator" in testi
-    assert "giulia e sara hanno pubblicato a pochi giorni di distanza" in testi
+    assert "pochi giorni di distanza (giulia e sara)" in testi
 
 
 def test_avvisi_storico_e_volume():
     long_busy = pd.DataFrame({"date": pd.date_range("2025-01-01", periods=200).strftime("%Y-%m-%d"), "orders": 12})
     assert data_warnings(long_busy) == []
     texts = [a.testo for a in data_warnings(long_busy.assign(orders=9))]
-    assert len(texts) == 1 and "9.0 ordini al giorno" in texts[0]
+    assert len(texts) == 1 and "9,0 ordini al giorno" in texts[0]
     texts = [a.testo for a in data_warnings(long_busy.head(179))]
     assert len(texts) == 1 and "179 giorni" in texts[0]
 
@@ -200,3 +200,120 @@ def test_dati_simulati():
 def test_split_codes():
     assert split_codes(" A10 , b20,a10 ") == ["a10", "b20"]
     assert split_codes(pd.NA) == [] and split_codes(None) == [] and split_codes("") == []
+
+
+# ---------------------------------------------------------------- casi trovati dalla revisione
+
+@pytest.mark.parametrize("scritto,valore", [
+    ("1.200", 1200), ("€ 1.200", 1200), ("1.200 €", 1200), ("12.500", 12500), ("1.234.567", 1234567),
+    ("1.200,50", 1200.5), ("1,200.50", 1200.5), ("500.50", 500.5), ("500,50", 500.5), ("0.500", 0.5),
+    ("1.5", 1.5), ("83,33", 83.33), ("500", 500),
+])
+def test_importi_come_li_scrive_excel_in_italiano(scritto, valore):
+    p = read_posts(f"creator;data_post;costo_eur\ngiulia;01/03/2025;{scritto}\n".encode("cp1252"))
+    assert p["cost_eur"].iloc[0] == pytest.approx(valore)
+
+
+def _posts_e_ordini(post_csv: bytes):
+    orders, _, _ = read_orders([("ordini.csv", SMALL)])
+    return build_daily(orders, read_posts(post_csv))
+
+
+def test_costo_vuoto_avvisa():
+    *_, avvisi = _posts_e_ordini(b"creator,data_post,costo_eur\ngiulia,2025-03-01,\nmarco,2025-03-02,300\n")
+    testi = [a.testo for a in avvisi if a.livello == "importante"]
+    assert any("Il costo di giulia e' 0" in t for t in testi)
+    assert not any("marco e' 0" in t for t in testi)
+    # pacchetto pagato sulla prima riga: nessun avviso
+    *_, avvisi = _posts_e_ordini(b"creator,data_post,costo_eur\ngiulia,2025-03-01,900\ngiulia,2025-03-03,\n")
+    assert not any("e' 0" in a.testo for a in avvisi)
+
+
+def test_righe_ripetute_e_stesso_giorno():
+    _, p, *_, avvisi = _posts_e_ordini(
+        b"creator,data_post,costo_eur,codice_sconto\ngiulia,2025-03-01,500,GIULIA10\n"
+        b"giulia,2025-03-01,500,GIULIA10\nmarco,2025-03-02,100,\nmarco,2025-03-02,50,\n")
+    assert p.set_index("creator")["cost_eur"].to_dict() == {"giulia": 500.0, "marco": 150.0}
+    assert len(p) == 2
+    testi = " ".join(a.testo for a in avvisi)
+    assert "la riga 3 e' uguale alla riga 2" in testi
+    assert "marco ha 2 righe il 02/03/2025" in testi
+
+
+def test_creator_sempre_negli_stessi_giorni_stimati_insieme():
+    daily, posts, _ = simulate(20, 1)
+    orders_csv, posts_csv, _ = to_shopify(daily, posts, seed=1)
+    extra = "".join(f"nuova_creator;{pd.Timestamp(d):%d/%m/%Y};100,00;NUOVA5\n"
+                    for d in posts.loc[posts.creator == "elena_fit", "date"])
+    d = load_shopify([("o.csv", orders_csv.encode())], (posts_csv + extra).encode())
+    assert "elena_fit + nuova_creator" in set(d.posts.creator)
+    assert "elena_fit" not in set(d.posts.creator)
+    assert d.posts.groupby("creator")["cost_eur"].sum()["elena_fit + nuova_creator"] == pytest.approx(1000)
+    assert any("sempre negli stessi giorni" in a.testo for a in d.avvisi)
+    est, _ = estimate(d.daily, d.posts, seed=0)
+    assert len(est) == 6
+
+
+def test_codice_scritto_male_avvisa():
+    *_, with_code, unassigned, avvisi = _posts_e_ordini(
+        b"creator,data_post,costo_eur,codice_sconto\ngiulia,2025-03-01,10,GIULIA_10\nmarco,2025-03-02,10,MARCO15\n")
+    assert with_code["giulia"] == 0
+    t = [a.testo for a in avvisi if "GIULIA_10" in a.testo]
+    assert len(t) == 1 and "forse e' quello" in t[0] and "GIULIA10" in t[0]
+
+
+def test_piu_codici_nella_stessa_cella():
+    p = read_posts("creator;data_post;costo_eur;codice_sconto\ngiulia;01/03/2025;10;\"GIULIA10\nGIULIA20\"\n"
+                   "sara;01/03/2025;10;SARA5 / SARA10\n".encode())
+    assert list(p["codes"]) == [["giulia10", "giulia20"], ["sara5", "sara10"]]
+
+
+def test_export_piu_recente_vince_anche_se_caricato_prima():
+    vecchio = csv_bytes("#2,a@x.it,paid,,EUR,10,0,1.8,10.00,GIULIA10,0,2025-03-02 10:00:00 +0100,1,X,10,,Shopify Payments,0,2,web\n")
+    nuovo = csv_bytes("#2,a@x.it,refunded,,EUR,10,0,1.8,10.00,GIULIA10,0,2025-03-02 10:00:00 +0100,1,X,10,,Shopify Payments,10,2,web\n"
+                      "#3,a@x.it,paid,,EUR,10,0,1.8,10.00,,0,2025-03-05 10:00:00 +0100,1,X,10,,Shopify Payments,0,3,web\n")
+    orders, esclusi, avvisi = read_orders([("nuovo.csv", nuovo), ("vecchio.csv", vecchio)])
+    assert list(orders["Name"]) == ["#3"] and esclusi == {"rimborsati": 1}
+    assert any("export piu' recente (nuovo.csv)" in a.testo for a in avvisi)
+
+
+def test_stesso_numero_in_due_negozi_sono_due_ordini():
+    it = csv_bytes("#1001,a@x.it,paid,,EUR,10,0,1.8,10.00,,0,2025-03-01 10:00:00 +0100,1,X,10,,Shopify Payments,0,1,web\n")
+    de = csv_bytes("#1001,b@x.de,paid,,EUR,20,0,3.6,20.00,,0,2025-04-01 11:00:00 +0200,1,X,20,,Shopify Payments,0,9,web\n")
+    orders, _, avvisi = read_orders([("it.csv", it), ("de.csv", de)])
+    assert len(orders) == 2 and sorted(orders["total"]) == [10.0, 20.0]
+    assert not any("piu' file" in a.testo for a in avvisi)
+
+
+@pytest.mark.parametrize("contenuto,atteso", [
+    (b"creator,data_post,costo_eur\ngiulia,2025-03-01,500,50\n", "riga 2: ci sono piu' valori che colonne"),
+    (b"creator,data_post,costo_eur\ngiulia,2025-03-01,500\nmarco,2025-03-02,500,50,X\n", "piu' valori che colonne"),
+    (b"creator,data_post,costo_eur\ngiulia,01/03/3025,500\n", "la data '01/03/3025' non e' valida"),
+    (b"creator,data_post,costo_eur,Creator\ngiulia,2025-03-01,500,x\n", "compare due volte"),
+    (b"creator;data_post;costo_eur\n;;\ngiulia;2025-03-01;10\n;;\nmarco;31/02/2025;10\n", "riga 5"),
+])
+def test_errori_in_italiano_con_la_riga_giusta(contenuto, atteso):
+    with pytest.raises(ErroreDati, match=atteso):
+        read_posts(contenuto)
+
+
+def test_export_ordini_rovinato():
+    rotto = (HEADER + '#1,a,paid,,EUR,10,0,1.8,10.00,,0,2025-03-01 10:00:00 +0100,1,X,10,,,0,1,web,"nota\n').encode()
+    rotto += b'#2,a,paid,,EUR,10,0,1.8,10.00,,0,2025-03-01 10:00:00 +0100,1,X,10,,,0,1,web,x,y,z\n'
+    with pytest.raises(ErroreDati):
+        read_orders([("ordini.csv", rotto)])
+
+
+def test_nomi_con_spazi_diversi_sono_lo_stesso_creator():
+    p = read_posts("creator,data_post,costo_eur\nGiulia Rossi,2025-03-01,10\nGiulia\u00a0 Rossi,2025-03-05,10\n"
+                   "giulia rossi,2025-03-09,10\n".encode())
+    assert set(p["creator"]) == {"Giulia Rossi"}
+
+
+def test_avvisi_raggruppati():
+    orders, _, _ = read_orders([("ordini.csv", SMALL)])
+    righe = "".join(f"c{i},2025-03-0{1 + i % 3},{10 + i}\n" for i in range(12))
+    *_, avvisi = build_daily(orders, read_posts(("creator,data_post,costo_eur\n" + righe).encode()))
+    vicini = [a for a in avvisi if "pochi giorni di distanza" in a.testo]
+    recenti = [a for a in avvisi if "ultimi 14 giorni" in a.testo]
+    assert len(vicini) == 1 and len(recenti) == 1

@@ -50,7 +50,10 @@ def base_design(daily: pd.DataFrame) -> pd.DataFrame:
     for k in (1, 2):
         X[f"sin{k}"] = np.sin(2 * np.pi * k * t / 365.25)
         X[f"cos{k}"] = np.cos(2 * np.pi * k * t / 365.25)
-    X["promo"] = daily["promo"].astype(float)
+    # senza nessun giorno di promozione la colonna sarebbe tutta a zero: non
+    # aggiunge nulla alla stima e renderebbe il modello singolare
+    if daily["promo"].astype(bool).any():
+        X["promo"] = daily["promo"].astype(float)
     return X
 
 

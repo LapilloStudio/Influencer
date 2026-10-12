@@ -181,6 +181,15 @@ def test_comandi_del_prototipo(tmp_path):
     assert (stima.giudizio == stima.apply(verdict, axis=1)).all()
 
 
+def test_senza_promozioni_il_modello_non_e_singolare():
+    import warnings
+    daily, posts, _ = simulate(20, 3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, _ = estimate(daily.assign(promo=0), posts, seed=3)
+    assert np.isfinite(out[["low_90", "high_90"]].to_numpy()).all()
+
+
 @pytest.mark.parametrize("row,expected", [
     ({"prob_effect_positive": 0.90, "roi": 3.0, "roi_low": 1.5}, "nessun effetto chiaro"),
     ({"prob_effect_positive": 0.99, "roi": 3.0, "roi_low": 1.2}, "si ripaga quasi certamente"),

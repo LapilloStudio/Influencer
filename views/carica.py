@@ -52,6 +52,10 @@ if fonte == "File del negozio (Shopify)":
         except ErroreDati as e:
             clear_data()
             st.error(str(e), icon="🚫")
+        except Exception:  # noqa: BLE001 - mai un errore tecnico in inglese all'utente
+            clear_data()
+            st.error("Non sono riuscito a leggere i file. Controlla di aver caricato l'export degli ordini di Shopify "
+                     "e il file dei post nel formato del modello, poi riprova.", icon="🚫")
         else:
             st.switch_page("views/risultati.py")
     elif not (ordini and post):

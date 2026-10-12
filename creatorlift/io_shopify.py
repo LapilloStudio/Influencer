@@ -22,7 +22,10 @@ Regole applicate (decise con il titolare del progetto):
 """
 from __future__ import annotations
 
+import difflib
 import io
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -104,66 +107,100 @@ def _decode(raw: bytes, nome: str) -> str:
         try:
             return raw.decode("cp1252")
         except UnicodeDecodeError:
-            raise ErroreDati(f"Non riesco a leggere {nome}: non e' un file CSV di testo.")
+            raise ErroreDati(f"Non riesco a leggere il file {nome}: non e' un file CSV di testo. "
+                             "Da Excel: File > Salva con nome > CSV.")
+
+
+def _too_many(nome: str, riga) -> ErroreDati:
+    return ErroreDati(
+        f"Nel file {nome}, riga {riga}: ci sono piu' valori che colonne. Succede quando le colonne sono separate "
+        "dalla virgola e un valore contiene una virgola (per esempio 1200,50 o due codici sconto): usa il punto e "
+        "virgola come separatore, come nel modello, oppure salva il file da Excel."
+    )
 
 
 def _read_table(raw: bytes, nome: str) -> pd.DataFrame:
     """CSV compilato a mano (post, promozioni): accetta ',' o ';' come separatore,
-    come lo salva Excel in italiano."""
+    come lo salva Excel in italiano. L'indice e' il numero di riga come in Excel
+    (riga 1 = intestazione), anche se ci sono righe vuote in mezzo."""
     text = _decode(raw, nome)
     if not text.strip():
         raise ErroreDati(f"Il file {nome} e' vuoto.")
     first = text.splitlines()[0]
     sep = ";" if first.count(";") > first.count(",") else ","
-    df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False)
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-    df = df.apply(lambda s: s.str.strip())
-    return df[(df != "").any(axis=1)].reset_index(drop=True)
+    try:
+        df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False, skip_blank_lines=False)
+    except pd.errors.ParserError as e:
+        m = re.search(r"line (\d+)", str(e))
+        raise _too_many(nome, m.group(1) if m else "?")
+    if not isinstance(df.index, pd.RangeIndex):  # la prima riga ha un valore in piu' dell'intestazione
+        raise _too_many(nome, 2)
+    cols = [re.sub(r"\s+", "_", c.strip().lower()) for c in df.columns]
+    doppie = sorted({c for c in cols if cols.count(c) > 1 and c})
+    if doppie:
+        raise ErroreDati(f"Nel file {nome} la colonna '{doppie[0]}' compare due volte.")
+    df.columns = cols
+    df = df.apply(lambda col: col.str.strip())
+    df.index = df.index + 2
+    return df[(df != "").any(axis=1)]
 
 
 def _parse_date_it(values: pd.Series, nome: str, colonna: str) -> pd.Series:
-    """Date scritte a mano: 2025-03-01, 01/03/2025, 01-03-2025, 01.03.2025."""
+    """Date scritte a mano: 2025-03-01, 01/03/2025, 1/3/25, 01-03-2025, 01.03.2025."""
     out = pd.Series(pd.NaT, index=values.index, dtype="datetime64[ns]")
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y"):
         missing = out.isna()
         if not missing.any():
             break
-        out[missing] = pd.to_datetime(values[missing], format=fmt, errors="coerce")
-    bad = out.isna() & (values != "")
+        parsed = pd.to_datetime(values[missing], format=fmt, errors="coerce")
+        # anni scritti male (3025, 0225) restano non validi invece di far fallire pandas
+        out[missing] = parsed.where(parsed.dt.year.between(2000, 2100)).astype("datetime64[ns]")
+    if (values == "").any():
+        riga = values.index[(values == "").to_numpy()][0]
+        raise ErroreDati(f"Nel file {nome}, colonna '{colonna}', riga {riga}: manca la data.")
+    bad = out.isna()
     if bad.any():
-        i = int(np.flatnonzero(bad.to_numpy())[0])
+        riga = values.index[bad.to_numpy()][0]
         raise ErroreDati(
-            f"Nel file {nome}, colonna '{colonna}', riga {i + 2}: la data '{values.iloc[i]}' non e' valida. "
+            f"Nel file {nome}, colonna '{colonna}', riga {riga}: la data '{values[riga]}' non e' valida. "
             "Scrivi le date come 2025-03-01 oppure 01/03/2025."
         )
-    if (values == "").any():
-        i = int(np.flatnonzero((values == "").to_numpy())[0])
-        raise ErroreDati(f"Nel file {nome}, colonna '{colonna}', riga {i + 2}: manca la data.")
     return out
 
 
+def _normalize_amount(v: str) -> str:
+    if "," in v and "." in v:  # 1.200,50 oppure 1,200.50: l'ultimo separatore e' quello dei decimali
+        dec = "," if v.rfind(",") > v.rfind(".") else "."
+        return v.replace("." if dec == "," else ",", "").replace(dec, ".")
+    if "," in v:  # 500,50
+        return v.replace(",", ".")
+    if re.fullmatch(r"[1-9]\d{0,2}(\.\d{3})+", v):  # 1.200, 25.000: punto delle migliaia, come lo salva Excel
+        return v.replace(".", "")
+    return v  # 500.50, 1.5
+
+
 def _parse_euro(values: pd.Series, nome: str, colonna: str) -> pd.Series:
-    """Importi scritti a mano: 500, 500.50, 500,50, 1.200,50, 1200 EUR, € 500."""
+    """Importi scritti a mano: 500, 500.50, 500,50, 1.200, 1.200,50, 1200 EUR, € 500.
+    Una cella vuota vale 0 (chi la usa riceve un avviso)."""
     s = values.str.replace("€", "", regex=False).str.replace("EUR", "", case=False, regex=False)
-    s = s.str.replace(" ", "", regex=False).str.replace(" ", "", regex=False)
-    has_comma = s.str.contains(",", regex=False)
-    s = s.where(~has_comma, s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False))
-    out = pd.to_numeric(s.replace("", "0"), errors="coerce")
+    s = s.str.replace(r"\s", "", regex=True)
+    out = pd.to_numeric(s.map(_normalize_amount).replace("", "0"), errors="coerce")
     if out.isna().any():
-        i = int(np.flatnonzero(out.isna().to_numpy())[0])
-        raise ErroreDati(f"Nel file {nome}, colonna '{colonna}', riga {i + 2}: l'importo '{values.iloc[i]}' non e' un numero.")
+        riga = values.index[out.isna().to_numpy()][0]
+        raise ErroreDati(f"Nel file {nome}, colonna '{colonna}', riga {riga}: l'importo '{values[riga]}' "
+                         "non e' un numero.")
     if (out < 0).any():
-        i = int(np.flatnonzero((out < 0).to_numpy())[0])
-        raise ErroreDati(f"Nel file {nome}, colonna '{colonna}', riga {i + 2}: l'importo non puo' essere negativo.")
+        riga = values.index[(out < 0).to_numpy()][0]
+        raise ErroreDati(f"Nel file {nome}, colonna '{colonna}', riga {riga}: l'importo non puo' essere negativo.")
     return out.astype(float)
 
 
-def split_codes(cell) -> list[str]:
+def split_codes(cell, extra_separators: str = "") -> list[str]:
     """'GIULIA10, Spedizione' -> ['giulia10', 'spedizione'] (confronto senza maiuscole)."""
     if cell is None or (isinstance(cell, float) and np.isnan(cell)) or cell is pd.NA:
         return []
     out = []
-    for tok in str(cell).replace(";", ",").split(","):
+    for tok in re.split(f"[,;{re.escape(extra_separators)}]", str(cell)):
         tok = tok.strip().casefold()
         if tok and tok not in out:
             out.append(tok)
@@ -188,7 +225,11 @@ def _read_shopify_file(raw: bytes, nome: str) -> pd.DataFrame:
             f"Il file {nome} usa il punto e virgola come separatore: probabilmente e' stato aperto e salvato "
             "con Excel. Carica il file originale scaricato da Shopify, senza aprirlo prima."
         )
-    df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
+    try:
+        df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
+    except pd.errors.ParserError:
+        raise ErroreDati(f"Il file {nome} non e' completo o e' stato modificato (alcune righe non hanno il numero "
+                         "giusto di colonne). Scaricalo di nuovo da Shopify e caricalo senza aprirlo.")
     df.columns = [c.strip() for c in df.columns]
     cols = set(df.columns)
     if {"Kind", "Gateway"} <= cols and "Lineitem quantity" not in cols:
@@ -214,34 +255,46 @@ def read_orders(files, include_zero: bool = False, include_test: bool = False):
     """Legge uno o piu' export ordini. Restituisce (ordini tenuti, esclusi, avvisi).
 
     `files`: lista di (nome, contenuto) oppure di contenuti (bytes, percorso,
-    file caricato). Se lo stesso ordine compare in piu' file vale l'ultimo file.
+    file caricato). Un ordine e' riconosciuto da numero (Name) e momento di
+    creazione: lo stesso numero in due negozi diversi sono due ordini. Se lo
+    stesso ordine compare in piu' file vale l'export piu' recente, perche'
+    rimborsi e annullamenti arrivano dopo; l'ordine di caricamento non conta.
     """
     if not isinstance(files, (list, tuple)):
         files = [files]
-    frames, avvisi = [], []
-    seen = set()
-    duplicates = 0
-    for k, item in enumerate(reversed(list(files))):  # l'ultimo file caricato ha la precedenza
-        nome, src = item if isinstance(item, tuple) else (getattr(item, "name", f"file {len(files) - k}"), item)
+    letti = []
+    for k, item in enumerate(files):
+        nome, src = item if isinstance(item, tuple) else (getattr(item, "name", f"file {k + 1}"), item)
         df = _read_shopify_file(_to_bytes(src), nome)
-        names = set(df["Name"].unique()) - {""}
-        dup = names & seen
+        df = df[df["Name"] != ""]
+        first = df["Created at"].replace("", pd.NA).groupby(df["Name"], sort=False).first()
+        when = pd.to_datetime(first, format="%Y-%m-%d %H:%M:%S %z", utc=True, errors="coerce")
+        letti.append((when.max() if when.notna().any() else pd.Timestamp.min.tz_localize("UTC"), k, nome, df,
+                      set(zip(first.index, first.fillna("")))))
+    letti.sort(key=lambda t: (t[0], t[1]), reverse=True)  # prima l'export piu' recente
+
+    frames, avvisi, seen, duplicates, vince = [], [], set(), 0, None
+    for _, k, nome, df, keys in letti:
+        dup = keys & seen
         if dup:
             duplicates += len(dup)
-            df = df[~df["Name"].isin(dup)]
-        seen |= names
-        frames.append(df)
+            vince = vince or letti[0][2]
+            dup_names = {n for n, _ in dup}
+            df = df[~(df["Name"].isin(dup_names) & df["Name"].map(
+                lambda n, c=dict(keys): (n, c.get(n, "")) in dup))]
+        seen |= keys
+        frames.append(df.assign(_order=f"{k}|" + df["Name"]))
     if duplicates:
-        avvisi.append(Avviso("info", f"{duplicates} ordini comparivano in piu' file: contati una volta sola."))
+        avvisi.append(Avviso("info", f"{duplicates} ordini comparivano in piu' file: contati una volta sola, "
+                                     f"con i dati dell'export piu' recente ({vince})."))
     raw = pd.concat(frames, ignore_index=True)
-    raw = raw[raw["Name"] != ""]
     if raw.empty:
         raise ErroreDati("Il file degli ordini non contiene nessun ordine.")
 
     # un ordine per riga: per ogni colonna il primo valore non vuoto
-    cols = [c for c in ["Name", "Created at", "Total", "Taxes", "Discount Code", "Financial Status",
+    cols = [c for c in ["_order", "Name", "Created at", "Total", "Taxes", "Discount Code", "Financial Status",
                         "Cancelled at", "Payment Method", "Currency", "Source"] if c in raw.columns]
-    orders = raw[cols].replace("", pd.NA).groupby("Name", sort=False).first().reset_index()
+    orders = raw[cols].replace("", pd.NA).groupby("_order", sort=False).first().reset_index(drop=True)
 
     created = pd.to_datetime(orders["Created at"], format="%Y-%m-%d %H:%M:%S %z", utc=True, errors="coerce")
     bad = created.isna()
@@ -308,9 +361,16 @@ def read_orders(files, include_zero: bool = False, include_test: bool = False):
 
 # ---------------------------------------------------------------- post e promozioni
 
+def _clean_name(name: str) -> str:
+    """Stesso nome scritto in modi diversi (spazi doppi o non separabili,
+    accenti composti in modo diverso) diventa uguale."""
+    return " ".join(unicodedata.normalize("NFC", name).split())
+
+
 def read_posts(src, nome: str = "dei post") -> pd.DataFrame:
     """Colonne: creator, data_post, costo_eur, codice_sconto (facoltativa).
-    Restituisce creator, date (AAAA-MM-GG), cost_eur, codes (lista)."""
+    Restituisce creator, date (AAAA-MM-GG), cost_eur, codes (lista), riga
+    (numero di riga nel file) e cost_blank (costo lasciato vuoto)."""
     df = _read_table(_to_bytes(src), nome)
     missing = [c for c in ("creator", "data_post", "costo_eur") if c not in df.columns]
     if missing:
@@ -319,20 +379,24 @@ def read_posts(src, nome: str = "dei post") -> pd.DataFrame:
     if df.empty:
         raise ErroreDati(f"Il file {nome} non contiene nessun post.")
     if (df["creator"] == "").any():
-        i = int(np.flatnonzero((df["creator"] == "").to_numpy())[0])
-        raise ErroreDati(f"Nel file {nome}, riga {i + 2}: manca il nome del creator.")
-    # stesso creator scritto con maiuscole diverse: un solo creator
+        riga = df.index[(df["creator"] == "").to_numpy()][0]
+        raise ErroreDati(f"Nel file {nome}, riga {riga}: manca il nome del creator.")
+    # stesso creator scritto con maiuscole o spazi diversi: un solo creator
+    names = df["creator"].map(_clean_name)
     canon = {}
-    for c in df["creator"]:
+    for c in names:
         canon.setdefault(c.casefold(), c)
-    df["creator"] = df["creator"].map(lambda c: canon[c.casefold()])
+    codes = (df["codice_sconto"].map(lambda c: split_codes(c, extra_separators="/|\r\n"))
+             if "codice_sconto" in df else pd.Series([[] for _ in range(len(df))], index=df.index))
     out = pd.DataFrame({
-        "creator": df["creator"],
+        "creator": names.map(lambda c: canon[c.casefold()]),
         "date": _parse_date_it(df["data_post"], nome, "data_post").dt.strftime("%Y-%m-%d"),
         "cost_eur": _parse_euro(df["costo_eur"], nome, "costo_eur"),
-        "codes": df["codice_sconto"].map(split_codes) if "codice_sconto" in df else [[] for _ in range(len(df))],
+        "codes": codes,
+        "riga": df.index,
+        "cost_blank": (df["costo_eur"] == "").to_numpy(),
     })
-    return out.sort_values(["date", "creator"]).reset_index(drop=True)
+    return out.sort_values(["date", "creator", "riga"]).reset_index(drop=True)
 
 
 def read_promo(src, nome: str = "delle promozioni") -> set[str]:
@@ -342,9 +406,9 @@ def read_promo(src, nome: str = "delle promozioni") -> set[str]:
     if {"data_inizio", "data_fine"} <= set(df.columns):
         a = _parse_date_it(df["data_inizio"], nome, "data_inizio")
         b = _parse_date_it(df["data_fine"], nome, "data_fine")
-        for i, (x, y) in enumerate(zip(a, b)):
+        for riga, x, y in zip(df.index, a, b):
             if y < x:
-                raise ErroreDati(f"Nel file {nome}, riga {i + 2}: la data di fine viene prima di quella di inizio.")
+                raise ErroreDati(f"Nel file {nome}, riga {riga}: la data di fine viene prima di quella di inizio.")
             days |= set(pd.date_range(x, y, freq="D").strftime("%Y-%m-%d"))
     elif "data" in df.columns:
         days |= set(_parse_date_it(df["data"], nome, "data").dt.strftime("%Y-%m-%d"))
@@ -364,29 +428,81 @@ def data_warnings(daily: pd.DataFrame) -> list[Avviso]:
         out.append(Avviso("importante", f"Ci sono solo {n} giorni di storico (ne servono almeno {MIN_DAYS}): "
                                         "la stima sara' molto incerta."))
     if per_day < MIN_ORDERS_PER_DAY:
-        out.append(Avviso("importante", f"In media ci sono {per_day:.1f} ordini al giorno (ne servono almeno "
+        media = f"{per_day:.1f}".replace(".", ",")
+        out.append(Avviso("importante", f"In media ci sono {media} ordini al giorno (ne servono almeno "
                                         f"{MIN_ORDERS_PER_DAY}): la stima sara' molto incerta e solo i creator con "
                                         "un effetto molto forte potranno emergere."))
     return out
 
 
+def _elenco(nomi) -> str:
+    nomi = list(nomi)
+    return nomi[0] if len(nomi) == 1 else ", ".join(nomi[:-1]) + " e " + nomi[-1]
+
+
 def _post_warnings(posts: pd.DataFrame, last_day: str) -> list[Avviso]:
     out = []
-    end = pd.Timestamp(last_day)
-    recent = posts[pd.to_datetime(posts["date"]) > end - pd.Timedelta(days=EFFECT_DAYS - 1)]
-    for c in sorted(recent["creator"].unique()):
-        out.append(Avviso("info", f"Un post di {c} e' degli ultimi {EFFECT_DAYS} giorni: il suo effetto non e' ancora "
-                                  "tutto visibile e rimborsi o annullamenti di questi giorni possono ancora arrivare."))
-    p = posts.assign(t=pd.to_datetime(posts["date"])).sort_values("t")
-    pairs = set()
-    for i, a in p.iterrows():
-        for j, b in p.iterrows():
-            if a.creator < b.creator and abs((a.t - b.t).days) <= 3:
-                pairs.add((a.creator, b.creator))
-    for a, b in sorted(pairs):
-        out.append(Avviso("info", f"{a} e {b} hanno pubblicato a pochi giorni di distanza: le vendite in piu' di quei "
-                                  "giorni sono difficili da dividere tra i due, e le loro stime saranno piu' incerte."))
+    t = pd.to_datetime(posts["date"])
+    recent = sorted(posts.loc[t > pd.Timestamp(last_day) - pd.Timedelta(days=EFFECT_DAYS - 1), "creator"].unique())
+    if recent:
+        out.append(Avviso("info", f"Post degli ultimi {EFFECT_DAYS} giorni ({_elenco(recent)}): il loro effetto non "
+                                  "e' ancora tutto visibile e rimborsi o annullamenti di questi giorni possono ancora "
+                                  "arrivare."))
+    # gruppi di post vicini (al massimo 3 giorni tra un post e il successivo) di creator diversi
+    p = posts.assign(t=t).sort_values("t")
+    gruppo = (p["t"].diff().dt.days > 3).cumsum()
+    gruppi = sorted({tuple(sorted(g.unique())) for _, g in p.groupby(gruppo)["creator"] if g.nunique() > 1})
+    if gruppi:
+        elenco = "; ".join(_elenco(g) for g in gruppi[:8]) + (f" e altri {len(gruppi) - 8} gruppi" if len(gruppi) > 8 else "")
+        out.append(Avviso("info", f"Alcuni creator hanno pubblicato a pochi giorni di distanza ({elenco}): le vendite "
+                                  "in piu' di quei giorni sono difficili da dividere tra loro, e le loro stime saranno "
+                                  "piu' incerte."))
+    zero = posts.groupby("creator")["cost_eur"].sum()
+    zero = sorted(zero[zero.round(0) == 0].index)
+    if zero:
+        out.append(Avviso("importante", f"Il costo di {_elenco(zero)} e' 0 € (cella vuota o 0): per "
+                                        f"{'lui o lei' if len(zero) == 1 else 'loro'} il ritorno sulla spesa non si "
+                                        "calcola. Se la collaborazione era pagata, scrivi il costo e ricarica il file."))
     return out
+
+
+def _clean_posts(posts: pd.DataFrame, avvisi: list) -> pd.DataFrame:
+    """Righe ripetute, piu' righe dello stesso creator nello stesso giorno, e
+    creator che hanno pubblicato sempre negli stessi giorni."""
+    posts = posts.copy()
+    if "riga" not in posts:
+        posts["riga"] = posts.index + 2
+    key = posts.apply(lambda r: (r.creator, r.date, r.cost_eur, tuple(sorted(r.codes))), axis=1)
+    dup = key.duplicated()
+    for r in posts[dup].itertuples():
+        prima = posts.loc[(key == key[r.Index]) & ~dup, "riga"].iloc[0]
+        avvisi.append(Avviso("importante", f"Nel file dei post la riga {r.riga} e' uguale alla riga {prima}: l'ho "
+                                           "contata una volta sola. Se erano davvero due contenuti dello stesso giorno, "
+                                           "scrivili in una riga con il costo totale."))
+    posts = posts[~dup]
+
+    # creator con esattamente gli stessi giorni di post: dai dati non si possono separare
+    giorni = posts.groupby("creator")["date"].agg(lambda s: tuple(sorted(set(s))))
+    rename = {}
+    for cs in giorni.groupby(giorni).groups.values():
+        if len(cs) > 1:
+            cs = sorted(cs)
+            joint = " + ".join(cs)
+            rename.update(dict.fromkeys(cs, joint))
+            avvisi.append(Avviso("importante", f"{_elenco(cs)} hanno pubblicato sempre negli stessi giorni: dai dati "
+                                               "non si puo' capire quante vendite ha portato ciascuno, quindi li stimo "
+                                               f"insieme come '{joint}', con i costi sommati."))
+    posts["creator"] = posts["creator"].replace(rename)
+
+    multi = posts.groupby(["creator", "date"]).size()
+    for (c, d), n in multi[multi > 1].items():
+        if c not in rename.values():
+            avvisi.append(Avviso("info", f"{c} ha {n} righe il {pd.Timestamp(d):%d/%m/%Y}: le ho considerate un solo "
+                                         "post, con i costi sommati."))
+    posts = (posts.groupby(["creator", "date"], as_index=False, sort=False)
+             .agg(cost_eur=("cost_eur", "sum"), codes=("codes", lambda s: sorted({k for ks in s for k in ks})),
+                  riga=("riga", "min")))
+    return posts.sort_values(["date", "creator"]).reset_index(drop=True)
 
 
 def build_daily(orders: pd.DataFrame, posts: pd.DataFrame, promo_days=frozenset()):
@@ -421,6 +537,7 @@ def build_daily(orders: pd.DataFrame, posts: pd.DataFrame, promo_days=frozenset(
     posts = posts.drop(outside.index).reset_index(drop=True)
     if posts.empty:
         raise ErroreDati(f"Nessun post cade nel periodo degli ordini ({first} - {last}).")
+    posts = _clean_posts(posts, avvisi)
 
     creators = sorted(posts["creator"].unique())
     codes = {c: sorted({k for ks in posts.loc[posts.creator == c, "codes"] for k in ks}) for c in creators}
@@ -430,7 +547,7 @@ def build_daily(orders: pd.DataFrame, posts: pd.DataFrame, promo_days=frozenset(
             owners.setdefault(k, []).append(c)
     for k, cs in owners.items():
         if len(cs) > 1:
-            avvisi.append(Avviso("importante", f"Il codice '{k}' e' assegnato a piu' creator ({', '.join(cs)}): "
+            avvisi.append(Avviso("importante", f"Il codice '{k.upper()}' e' assegnato a piu' creator ({', '.join(cs)}): "
                                                "gli ordini con quel codice sono contati per ciascuno."))
     with_code = {}
     for c in creators:
@@ -449,6 +566,17 @@ def build_daily(orders: pd.DataFrame, posts: pd.DataFrame, promo_days=frozenset(
     assigned = set(owners)
     counts = pd.Series([k for ks in orders["codes"] for k in ks if k not in assigned], dtype=object).value_counts()
     unassigned = counts.rename_axis("codice").reset_index(name="ordini")
+
+    # codici del file dei post che nessun ordine contato ha usato: spesso un errore di battitura
+    used = {k for ks in orders["codes"] for k in ks}
+    for c in creators:
+        for k in codes[c]:
+            if k not in used:
+                simili = difflib.get_close_matches(k, list(unassigned["codice"]), n=1, cutoff=0.75)
+                forse = f" Negli ordini c'e' '{simili[0].upper()}': forse e' quello?" if simili else ""
+                avvisi.append(Avviso("importante", f"Nessun ordine contato ha usato il codice '{k.upper()}' di {c}: "
+                                                   "controlla che sia scritto come in Shopify (piu' codici vanno "
+                                                   f"separati da una virgola).{forse}"))
 
     avvisi += _post_warnings(posts, last)
     return daily, posts[["creator", "date", "cost_eur"]], codes, with_code, unassigned, avvisi

@@ -30,7 +30,7 @@ Due possibilità.
    | giulia_style | 10/02/2025 | 600,00 | GIULIA10 |
    | marco_daily | 16/03/2025 | 400,00 | |
 
-   `codice_sconto` è facoltativo. Le date possono essere `2025-02-10` o `10/02/2025`, gli importi `600`, `600,00` o `1.200,50`; va bene anche il file salvato da Excel con il punto e virgola. Il costo è quello del singolo post: per un creator si sommano i costi di tutti i suoi post.
+   `codice_sconto` è facoltativo; più codici nella stessa cella si separano con una virgola (o vanno a capo). Le date possono essere `2025-02-10` o `10/02/2025`, gli importi `600`, `600,00`, `1.200` o `1.200,50`; va bene anche il file salvato da Excel con il punto e virgola. Il costo è quello del singolo post: per un creator si sommano i costi di tutti i suoi post. Una cella del costo vuota vale 0 (con un avviso se il totale del creator resta 0).
 3. **Giorni di promozione** (facoltativo): colonne `data_inizio` e `data_fine` (oppure una colonna `data` con un giorno per riga). Saldi e Black Friday aiutano il motore a non scambiare una promozione per l'effetto di un creator.
 
 Sotto "Ordini da contare" si può decidere se contare anche gli ordini a 0 € e quelli di prova (di default no).
@@ -58,7 +58,13 @@ L'export degli ordini ha una riga per articolo: i dati dell'ordine (totale, stat
 - **conta** i pagati, i parzialmente rimborsati e quelli in attesa (contrassegno, bonifico);
 - riconosce i codici sconto senza badare a maiuscole e spazi, anche quando un ordine ne usa più di uno;
 - calcola lo scontrino medio per il ROI **al netto dell'IVA**: `(Total − Taxes) / ordini`;
-- se si carica un file sbagliato (riaperto con Excel, storico transazioni invece degli ordini, colonne mancanti) lo dice in italiano e spiega cosa caricare.
+- se lo stesso ordine compare in più export, usa quello dell'export più recente (rimborsi e annullamenti arrivano dopo); due negozi con gli stessi numeri d'ordine restano distinti;
+- se si carica un file sbagliato (riaperto con Excel, storico transazioni invece degli ordini, colonne mancanti, righe con troppi valori) lo dice in italiano, indicando la riga, e spiega cosa caricare.
+
+Nel file dei post:
+- righe identiche vengono contate una volta, e più righe dello stesso creator nello stesso giorno diventano un solo post con i costi sommati (con un avviso);
+- se un codice sconto non compare in nessun ordine, l'app lo segnala e suggerisce il codice più simile trovato negli ordini;
+- **due o più creator che hanno pubblicato sempre negli stessi giorni vengono stimati insieme** (per esempio "giulia + sara", con i costi sommati): dai dati non si può capire quante vendite ha portato ciascuno, e stimarli separati darebbe numeri falsamente precisi.
 
 Per provare questa parte senza un negozio vero:
 
@@ -106,7 +112,7 @@ python run_tests.py 60
 ## Test
 
 ```
-python -m pytest            # tutti i test, circa un minuto e mezzo
+python -m pytest                 # tutti i test, circa un minuto
 python -m pytest -m "not slow"   # salta i due test di calibrazione su 30 negozi
 ```
 
@@ -125,6 +131,8 @@ Verificano tra l'altro:
 2. Per ogni creator si aggiungono quattro "finestre" dopo ogni post: il giorno stesso, 1-2 giorni, 3-6 giorni e 7-13 giorni. Così ogni creator ha la sua forma di effetto, rapido o lento.
 3. Le vendite in più di un creator sono la differenza tra gli ordini previsti con i suoi post e quelli previsti senza.
 4. L'incertezza si calcola ripetendo il conto 2.000 volte con coefficienti estratti dalla loro distribuzione.
+
+Se non c'è nessun giorno di promozione, la colonna delle promozioni (che sarebbe tutta a zero) non entra nel modello: non cambia le stime e lo rende risolvibile.
 
 Il giudizio: "nessun effetto chiaro" se la probabilità che l'effetto sia positivo è sotto il 95%; altrimenti "si ripaga quasi certamente" se anche l'estremo basso dell'intervallo del ROI è sopra 1, "probabilmente si ripaga" se lo è la stima, "porta vendite ma non si ripaga" negli altri casi.
 
@@ -147,7 +155,7 @@ Cosa dicono:
 ## Limiti
 
 - I dati simulati seguono le stesse ipotesi del modello. Sui dati veri l'errore sarà più grande.
-- Due creator che pubblicano negli stessi giorni non si separano bene (l'app lo segnala).
+- Due creator che pubblicano a pochi giorni di distanza non si separano bene (l'app lo segnala); se pubblicano sempre negli stessi giorni vengono stimati insieme.
 - Con meno di un anno di dati la stagionalità annuale si confonde con l'andamento di fondo e può assorbire parte dell'effetto dei creator.
 - L'export di Shopify è una fotografia: rimborsi e annullamenti degli ultimi giorni possono ancora arrivare (l'app avvisa per i post delle ultime due settimane).
 - Il ROI usa lo scontrino medio di tutto il negozio; gli ordini portati dai creator, spesso scontati, possono valere meno.
