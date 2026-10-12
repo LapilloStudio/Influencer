@@ -1,0 +1,14 @@
+[project]
+name = "creatorlift"
+version = "0.1.0"
+description = "Stima delle vendite in piu' portate da ogni collaborazione con un creator"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["creatorlift"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: test su molti negozi simulati (decine di secondi); escludibili con -m 'not slow'",
+]

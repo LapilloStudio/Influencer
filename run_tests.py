@@ -14,8 +14,8 @@ import sys
 import numpy as np
 import pandas as pd
 
-from estimate import estimate, verdict
-from simulate import CREATORS, simulate
+from creatorlift.model import estimate, verdict
+from creatorlift.simulate import CREATORS, simulate
 
 SIZES = [5, 20, 80]
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 60

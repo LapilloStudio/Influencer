@@ -1,0 +1,6 @@
+# versioni con cui il progetto e' stato provato
+numpy==2.5.3
+pandas==3.0.5
+scipy==1.18.1
+statsmodels==0.15.0
+pytest==9.1.1
