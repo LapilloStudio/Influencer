@@ -4,6 +4,8 @@ Stima quante vendite in più ha portato davvero ogni collaborazione con un creat
 
 Tutto gira sul tuo computer: nessun file e nessun dato viene inviato altrove (vedi [Privacy](#privacy)).
 
+La documentazione completa è in [`docs/`](docs/README.md): guida all'uso, formato dei file, metodo e validazione, privacy, architettura e registro dei lavori.
+
 ## Avvio
 
 Serve Python 3.12 o più recente.
