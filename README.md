@@ -156,7 +156,7 @@ Cosa dicono:
 
 ## Limiti
 
-- I dati simulati seguono le stesse ipotesi del modello. Sui dati veri l'errore sarà più grande.
+- I dati simulati seguono le stesse ipotesi del modello. Su un negozio vero (dati pubblici) gli intervalli sono risultati troppo stretti: circa il 10% di falsi positivi invece del 5% (vedi [docs/prova-post-finti.md](docs/prova-post-finti.md)).
 - Due creator che pubblicano a pochi giorni di distanza non si separano bene (l'app lo segnala); se pubblicano sempre negli stessi giorni vengono stimati insieme.
 - Con meno di un anno di dati la stagionalità annuale si confonde con l'andamento di fondo e può assorbire parte dell'effetto dei creator.
 - L'export di Shopify è una fotografia: rimborsi e annullamenti degli ultimi giorni possono ancora arrivare (l'app avvisa per i post delle ultime due settimane).

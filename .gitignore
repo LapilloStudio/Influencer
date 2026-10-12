@@ -7,3 +7,4 @@ dati_simulati/
 .pytest_cache/
 *.egg-info/
 build/
+prova_post_finti_risultati.csv

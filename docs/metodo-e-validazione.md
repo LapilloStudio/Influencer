@@ -80,6 +80,10 @@ Il test pytest usa i seed fissi 0-29 (copertura 91,1%, falsi positivi 3,3%), qui
 - Il solo codice sconto sbaglia in modo prevedibile: per i creator forti conta circa metà delle vendite vere; per il creator senza effetto ne conta comunque circa 13 (coupon trapelati).
 - Sotto circa 20 ordini al giorno il segnale è debole: emergono solo i creator forti, e non sempre. I creator deboli non si distinguono dal rumore a nessuna dimensione.
 
+## Su dati reali
+
+Su un negozio vero (dati pubblici) la prova dei post finti mostra intervalli **troppo stretti**: circa il 10% di falsi positivi invece del 5% a 65 ordini al giorno. Dettagli, causa e correzione proposta in [Prova dei post finti](prova-post-finti.md).
+
 ## Limiti
 
 - I dati simulati seguono le stesse ipotesi del modello: sui dati veri l'errore sarà più grande.

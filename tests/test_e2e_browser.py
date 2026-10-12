@@ -78,3 +78,44 @@ def test_nessuna_richiesta_esterna(server, tmp_path):
     assert len(richieste) > 5
     python_side = log.read_text().strip()
     assert python_side == "", python_side
+
+
+def test_pulizia_export_nel_browser(tmp_path):
+    """strumenti/pulisci_export_shopify.html toglie i dati personali e l'app
+    legge dal file pulito gli stessi ordini dell'originale."""
+    if not Path(CHROMIUM).exists():
+        pytest.skip("Chromium non trovato")
+    import pandas as pd
+
+    from creatorlift.io_shopify import read_orders
+    from creatorlift.simulate import simulate, to_shopify
+
+    daily, posts, _ = simulate(10, 3)
+    csv_text, _, _ = to_shopify(daily, posts, seed=3)
+    df = pd.read_csv(__import__("io").StringIO(csv_text), dtype=str, keep_default_na=False)
+    df.loc[0, "Notes"] = 'Consegnare "dopo le 18", citofono Rossi,\nsecondo piano'
+    df.loc[0, "Phone"] = "+39 333 1234567"
+    original = tmp_path / "orders_export.csv"
+    original.write_bytes(("﻿" + df.to_csv(index=False, lineterminator="\r\n")).encode())
+
+    with sync_api.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM, args=["--no-sandbox"])
+        page = browser.new_page(accept_downloads=True)
+        richieste = []
+        page.on("request", lambda r: richieste.append(r.url))
+        page.goto((ROOT / "strumenti" / "pulisci_export_shopify.html").as_uri())
+        page.set_input_files("#file", str(original))
+        page.get_by_text("Fatto:").wait_for(timeout=30_000)
+        with page.expect_download() as dl:
+            page.get_by_role("button", name="Scarica il file pulito").click()
+        cleaned = Path(dl.value.path()).read_bytes()
+        browser.close()
+
+    assert all(u.startswith(("file:", "blob:", "data:")) for u in richieste), richieste
+    text = cleaned.decode()
+    for personale in ("@example.com", "Mario Rossi", "Milano", "citofono", "333 1234567", "Email", "Billing"):
+        assert personale not in text
+    a, ea, _ = read_orders([("o.csv", original.read_bytes())])
+    b, eb, _ = read_orders([("o.csv", cleaned)])
+    pd.testing.assert_frame_equal(a, b)
+    assert ea == eb

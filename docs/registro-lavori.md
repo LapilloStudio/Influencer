@@ -60,6 +60,12 @@ Nessuno cambia il metodo; sui dati simulati i numeri restano identici al prototi
 3. **Creator con esattamente le stesse date di post stimati insieme** (`A + B`, costi sommati), perché il modello non può separarli.
 4. **Grafico giorno per giorno**: la fascia mostrata è la variazione normale di un giorno, non solo l'incertezza dei coefficienti, perché è quella con cui si confrontano i singoli giorni.
 
+## Fase 1 di validazione
+
+- **Prova dei post finti su ordini reali pubblici** (`creatorlift/placebo.py`, `scripts/prova_dati_pubblici.py`): sul negozio vero il motore dà il 10% di falsi positivi invece del 5% e l'intervallo contiene lo zero solo nel 72% dei casi invece del 90%. Causa: scarti correlati da un giorno all'altro, assenti nei dati simulati. Newey-West peggiora; una taratura con i post finti sul negozio stesso funziona. **Non applicata: serve una decisione** (vedi [Prova dei post finti](prova-post-finti.md)).
+- **Pagina per togliere i dati personali** dall'export Shopify (`strumenti/pulisci_export_shopify.html`): si apre con un doppio clic, lavora senza connessione; verificata in Chromium (l'app legge dal file pulito gli stessi ordini dell'originale).
+- **Messaggi per brand e agenzie pilota** ([Messaggi per i pilota](messaggi-pilota.md)).
+
 ## Cose da fare
 
 - Provare l'app con **un export reale di un negozio italiano** (IVA inclusa, ordini con più codici, un annullato, un rimborso parziale) e aggiungerlo ai test.

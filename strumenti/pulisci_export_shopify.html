@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulisci export Shopify</title>
+<style>
+  :root { --bg:#f9f9f7; --card:#fff; --ink:#0b0b0b; --ink2:#52514e; --line:#e1e0d9; --accent:#2a78d6; --ok:#006300; --err:#b42318; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0d0d0d; --card:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --line:#2c2c2a; --accent:#3987e5; --ok:#0ca30c; --err:#f97066; } }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:26px; margin:0 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px; margin:20px 0; }
+  .muted { color:var(--ink2); font-size:14px; }
+  label.drop { display:block; border:2px dashed var(--line); border-radius:10px; padding:28px 16px; text-align:center; cursor:pointer; }
+  label.drop:hover { border-color:var(--accent); }
+  input[type=file] { display:none; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 18px; font:inherit; cursor:pointer; }
+  button[disabled] { opacity:.5; cursor:default; }
+  .ok { color:var(--ok); } .err { color:var(--err); }
+  ul { padding-left:20px; } code { font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pulisci l'export degli ordini di Shopify</h1>
+  <p class="muted">Toglie dal file tutti i dati dei clienti (nomi, email, telefoni, indirizzi, note) e tiene solo quello che serve per stimare l'effetto dei creator. Il file non viene inviato da nessuna parte: tutto avviene in questa pagina, anche senza connessione.</p>
+
+  <div class="card">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".csv,text/csv">
+      <strong>Scegli l'export degli ordini (CSV)</strong><br>
+      <span class="muted">Shopify › Ordini › Esporta › "Tutti gli ordini". Non aprirlo prima con Excel.</span>
+    </label>
+    <p id="status" class="muted" aria-live="polite"></p>
+    <button id="save" disabled>Scarica il file pulito</button>
+  </div>
+
+  <div class="card">
+    <strong>Colonne che restano</strong>
+    <p class="muted" id="kept"></p>
+    <strong>Tutto il resto viene tolto</strong>, per esempio: Email, Billing Name, Billing Address, Shipping Name, Shipping Address, Phone, Notes, Note Attributes, Payment Reference, Tags.
+  </div>
+</main>
+<script>
+// Colonne necessarie a Creator Lift (creatorlift/io_shopify.py). Nessun dato personale.
+const KEEP = ["Name", "Created at", "Financial Status", "Currency", "Subtotal", "Shipping", "Taxes", "Total",
+              "Discount Code", "Discount Amount", "Cancelled at", "Payment Method", "Refunded Amount", "Source"];
+const REQUIRED = ["Name", "Created at", "Total", "Discount Code", "Financial Status"];
+document.getElementById("kept").textContent = KEEP.join(", ");
+
+// CSV secondo RFC 4180: virgolette, virgolette raddoppiate, a capo dentro i campi, CRLF.
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = []; let row = [], field = "", i = 0, q = false;
+  while (i < text.length) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } q = false; i++; continue; }
+      field += c; i++; continue;
+    }
+    if (c === '"') { q = true; i++; continue; }
+    if (c === ",") { row.push(field); field = ""; i++; continue; }
+    if (c === "\r") { i++; continue; }
+    if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+    field += c; i++;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+function toCSV(rows) {
+  return rows.map(r => r.map(v => /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v).join(",")).join("\n") + "\n";
+}
+
+let output = null, outName = "ordini_puliti.csv";
+const status = document.getElementById("status"), save = document.getElementById("save");
+function say(msg, cls) { status.className = cls || "muted"; status.textContent = msg; }
+
+document.getElementById("file").addEventListener("change", async (e) => {
+  output = null; save.disabled = true;
+  const f = e.target.files[0]; if (!f) return;
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(await f.arrayBuffer()); }
+  catch { return say("Il file sembra aperto e salvato con Excel. Scarica di nuovo l'export da Shopify e caricalo senza aprirlo.", "err"); }
+  const rows = parseCSV(text);
+  if (!rows.length) return say("Il file è vuoto.", "err");
+  const header = rows[0].map(h => h.trim());
+  if (header.length === 1 && header[0].includes(";"))
+    return say("Il file usa il punto e virgola: probabilmente è stato salvato con Excel. Carica il file originale di Shopify.", "err");
+  const missing = REQUIRED.filter(c => !header.includes(c));
+  if (missing.length) return say("Non sembra l'export degli ordini di Shopify: mancano le colonne " + missing.join(", ") + ".", "err");
+  const idx = KEEP.map(c => header.indexOf(c)).filter(i => i >= 0);
+  const out = [idx.map(i => header[i])];
+  const orders = new Set();
+  for (const r of rows.slice(1)) {
+    if (r.length === 1 && r[0] === "") continue;
+    out.push(idx.map(i => r[i] ?? ""));
+    const n = r[header.indexOf("Name")]; if (n) orders.add(n);
+  }
+  output = toCSV(out);
+  outName = f.name.replace(/\.csv$/i, "") + "_pulito.csv";
+  save.disabled = false;
+  say(`Fatto: ${orders.size.toLocaleString("it-IT")} ordini, ${header.length - idx.length} colonne tolte, ${idx.length} tenute.`, "ok");
+});
+
+save.addEventListener("click", () => {
+  if (!output) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([output], { type: "text/csv" }));
+  a.download = outName; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+</script>
+</body>
+</html>
