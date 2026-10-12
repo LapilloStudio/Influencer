@@ -29,6 +29,7 @@ import statsmodels.api as sm
 
 HALF_LIFE_GRID = [0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
 N_DRAWS = 2000
+LAM_MAX = 1e15  # sotto il limite di numpy per la Poisson (~9.2e18)
 
 
 def adstock(n_days: int, post_days, half_life: float) -> np.ndarray:
@@ -98,7 +99,12 @@ class Fit:
     orders: np.ndarray
 
     def creator_columns(self, creator):
-        return [i for i, col in enumerate(self.X.columns) if col.startswith(f"cr_{creator}__")]
+        # nomi esatti delle colonne: un confronto per prefisso confonderebbe
+        # "giulia" con "giulia_" o "giulia__style"
+        if creator not in self.creators:
+            raise KeyError(f"creator {creator!r} non presente nella stima; creator disponibili: {self.creators}")
+        names = {f"cr_{creator}__{a}_{b}" for a, b in WINDOWS} | {f"cr_{creator}__hl"}
+        return [i for i, col in enumerate(self.X.columns) if col in names]
 
     def without(self, creator) -> np.ndarray:
         """Matrice del modello con i post del creator azzerati."""
@@ -175,28 +181,45 @@ def daily_paths(f: Fit, creator: str, seed: int = 0) -> pd.DataFrame:
                        senza il creator: aggiunge la variabilita' giornaliera
                        (sovradispersione stimata dal modello). E' la fascia
                        con cui ha senso confrontare i singoli giorni reali.
+                       Gli ordini sono numeri interi, quindi con pochi ordini
+                       al giorno la fascia contiene un po' piu' del 90% dei
+                       giorni normali (circa 95% a 5 ordini/giorno).
       incremental      with_creator - without_creator (sommato su tutti i
                        giorni da' la stima puntuale di `estimate`)
+
+    Le fasce sono NaN nei giorni in cui non sono definite: succede quando una
+    finestra di qualche creator cade solo su giorni con zero ordini, e il suo
+    coefficiente non si puo' stimare (in quel caso anche `estimate` restituisce
+    un intervallo NaN per i creator coinvolti).
     """
     beta = f.res.params.values
     Xv = f.X.values
     X0 = f.without(creator)
-    mu0_draws = np.exp(X0 @ f.draws.T)  # giorni x estrazioni
-    with_c = np.exp(Xv @ beta)
-    without_c = np.exp(X0 @ beta)
-    lo, hi = np.percentile(mu0_draws, [5, 95], axis=1)
+    with np.errstate(over="ignore", invalid="ignore"):
+        mu0_draws = np.exp(X0 @ f.draws.T)  # giorni x estrazioni
+        with_c = np.exp(Xv @ beta)
+        without_c = np.exp(X0 @ beta)
+        lo, hi = np.percentile(mu0_draws, [5, 95], axis=1)
 
-    # ordini simulati con varianza = scale * media (quasi-Poisson), tramite
-    # gamma-Poisson; con scale <= 1 si usa la Poisson semplice
-    rng = np.random.default_rng(seed + 1)
-    phi = float(f.res.scale)
-    if phi > 1:
-        k = phi - 1.0
-        lam = rng.gamma(shape=mu0_draws / k, scale=k)
-    else:
-        lam = mu0_draws
-    sim = rng.poisson(lam)
-    nlo, nhi = np.percentile(sim, [5, 95], axis=1)
+        # ordini simulati con varianza = scale * media (quasi-Poisson), tramite
+        # gamma-Poisson; con scale <= 1 si usa la Poisson semplice
+        rng = np.random.default_rng(seed + 1)
+        phi = float(f.res.scale)
+        if phi > 1:
+            k = phi - 1.0
+            lam = rng.gamma(shape=mu0_draws / k, scale=k)
+        else:
+            lam = mu0_draws
+        # estrazioni esplose (coefficiente non stimabile): restano infinite
+        # invece di far fallire rng.poisson; con lam = 0 non si consumano
+        # numeri casuali, quindi sui dati normali il risultato non cambia
+        bad = ~(lam <= LAM_MAX)
+        sim = rng.poisson(np.where(bad, 0.0, lam)).astype(float)
+        sim[bad] = np.inf
+        nlo, nhi = np.percentile(sim, [5, 95], axis=1)
+    undefined = ~(np.isfinite(hi) & np.isfinite(nhi))
+    for a in (lo, hi, nlo, nhi):
+        a[undefined] = np.nan
 
     return pd.DataFrame({
         "date": pd.to_datetime(f.dates).to_numpy(),

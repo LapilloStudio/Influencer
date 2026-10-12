@@ -1,13 +1,16 @@
 """Test del motore di stima (creatorlift.model)."""
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from creatorlift.model import daily_paths, estimate, verdict
+from creatorlift.model import Fit, daily_paths, estimate, fit_and_draw, verdict
 from creatorlift.simulate import simulate
 
+ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).parent / "fixtures"
 
 # Seed fissi: il risultato del test di calibrazione e' deterministico.
@@ -58,7 +61,8 @@ def test_creator_senza_effetto_raramente_giudicato_utile(calibration):
 @pytest.mark.parametrize("mode", ["windows", "halflife"])
 def test_uguale_al_prototipo(mode):
     """Il motore spostato nel pacchetto da' esattamente i numeri del prototipo
-    originale (salvati in fixtures/golden_originale.csv prima del refactoring)."""
+    originale. fixtures/golden_originale.csv e' stato generato con
+    `git show 7086e5a:estimate.py` (primo commit, prototipo invariato)."""
     golden = pd.read_csv(FIXTURES / "golden_originale.csv")
     for seed in (0, 1, 2):
         daily, posts, _ = simulate(20, seed)
@@ -93,7 +97,7 @@ def test_daily_paths_coerente_con_stima():
         assert (p.orders.to_numpy() == daily.orders.to_numpy()).all()
         point = out.set_index("creator").loc[creator, "incremental_orders"]
         assert p.incremental.sum() == pytest.approx(point, abs=0.06)
-        assert (p.without_lo <= p.without_hi).all()
+        assert ((p.without_lo < p.without_creator) & (p.without_creator < p.without_hi)).all()
         assert (p.normal_lo <= p.without_lo + 1).all() and (p.normal_hi >= p.without_hi - 1).all()
         # lontano dai post la previsione con e senza il creator coincide
         days = [daily.index[daily.date == d][0] for d in posts.loc[posts.creator == creator, "date"]]
@@ -101,6 +105,8 @@ def test_daily_paths_coerente_con_stima():
         for d in days:
             far[d:d + 14] = False
         np.testing.assert_allclose(p.with_creator[far], p.without_creator[far])
+    with pytest.raises(KeyError):
+        daily_paths(f, "Giulia_Style")
 
 
 def test_fascia_normale_contiene_circa_il_90_percento_dei_giorni():
@@ -115,6 +121,64 @@ def test_fascia_normale_contiene_circa_il_90_percento_dei_giorni():
         no_post[i:i + 14] = False
     inside = ((p.orders >= p.normal_lo) & (p.orders <= p.normal_hi))[no_post].mean()
     assert 0.80 <= inside <= 0.98
+
+
+def test_fascia_normale_segue_la_sovradispersione():
+    """Su dati molto piu' variabili del previsto la fascia si allarga: con la
+    sola Poisson coprirebbe circa il 60% dei giorni."""
+    daily, posts, _ = simulate(20, 4)
+    rng = np.random.default_rng(104)
+    daily = daily.assign(orders=rng.poisson(daily.orders.to_numpy() * rng.gamma(8.0, 1 / 8.0, len(daily))))
+    f = fit_and_draw(daily, posts, seed=4)
+    p = daily_paths(f, f.creators[0])
+    no_post = np.ones(len(daily), bool)
+    for d in posts.date:
+        i = daily.index[daily.date == d][0]
+        no_post[i:i + 14] = False
+    inside = ((p.orders >= p.normal_lo) & (p.orders <= p.normal_hi))[no_post].mean()
+    assert 0.85 <= inside <= 0.97
+
+
+@pytest.mark.filterwarnings("ignore:covariance is not symmetric")
+def test_giorno_del_post_senza_ordini_non_rompe_i_grafici():
+    """Se il giorno di un post ha zero ordini quel coefficiente non e'
+    stimabile: le fasce restano vuote (NaN) solo in quel giorno, senza errori."""
+    daily, posts, _ = simulate(20, 1)
+    day = posts.loc[posts.creator == "elena_fit", "date"].iloc[0]
+    i = daily.index[daily.date == day][0]
+    daily.loc[i, "orders"] = 0
+    f = fit_and_draw(daily, posts, seed=1)
+    for c in f.creators:
+        p = daily_paths(f, c)
+        assert np.isfinite(p.with_creator).all() and np.isfinite(p.without_creator).all()
+        missing = np.flatnonzero(p.normal_hi.isna().to_numpy())
+        assert set(missing) <= {i}
+
+
+def test_nomi_simili_non_si_confondono():
+    """'giulia' e 'giulia_' sono due creator diversi."""
+    daily, posts, _ = simulate(20, 2)
+    posts = posts.copy()
+    posts.loc[posts.creator == "giulia_style", "creator"] = "giulia"
+    posts.loc[posts.creator == "fede_vlog", "creator"] = "giulia_"
+    f = fit_and_draw(daily, posts, seed=2)
+    cols = [f.X.columns[j] for j in f.creator_columns("giulia")]
+    assert cols == ["cr_giulia__0_0", "cr_giulia__1_2", "cr_giulia__3_6", "cr_giulia__7_13"]
+
+
+def test_comandi_del_prototipo(tmp_path):
+    """python simulate.py / python estimate.py funzionano come prima."""
+    subprocess.run([sys.executable, "simulate.py", "--orders-per-day", "20", "--seed", "1", "--out", str(tmp_path)],
+                   cwd=ROOT, check=True, capture_output=True)
+    subprocess.run([sys.executable, "estimate.py", str(tmp_path)], cwd=ROOT, check=True, capture_output=True)
+    stima = pd.read_csv(tmp_path / "stima.csv")
+    assert list(stima.columns) == ["creator", "orders_with_code", "incremental_orders", "low_90", "high_90",
+                                   "prob_effect_positive", "cost_eur", "roi", "roi_low", "roi_high", "giudizio"]
+    daily = pd.read_csv(tmp_path / "ordini_giornalieri.csv")
+    posts = pd.read_csv(tmp_path / "post_creator.csv")
+    out, _ = estimate(daily, posts, aov=daily.revenue_eur.sum() / daily.orders.sum(), margin=0.55)
+    pd.testing.assert_frame_equal(stima[out.columns], out, check_dtype=False)
+    assert (stima.giudizio == stima.apply(verdict, axis=1)).all()
 
 
 @pytest.mark.parametrize("row,expected", [

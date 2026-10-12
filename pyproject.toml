@@ -3,6 +3,10 @@ name = "creatorlift"
 version = "0.1.0"
 description = "Stima delle vendite in piu' portate da ogni collaborazione con un creator"
 requires-python = ">=3.10"
+dependencies = ["numpy>=2.2", "pandas>=2.2", "statsmodels>=0.14.4"]
+
+[project.optional-dependencies]
+test = ["pytest"]
 
 [tool.setuptools]
 packages = ["creatorlift"]
