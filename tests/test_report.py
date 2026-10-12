@@ -84,7 +84,7 @@ def test_casi_limite_tabella(sim):
     e2.loc[1, "cost_eur"] = 0.0
     res = R.results(e2, d, 0.55)
     t = R.display_table(res).set_index("Creator")
-    assert t.loc[e2.creator[0], "Intervallo probabile (90%)"] == R.NOT_ENOUGH
+    assert t.loc[e2.creator[0], "Intervallo probabile"] == R.NOT_ENOUGH
     assert t.loc[e2.creator[0], "Giudizio"] == R.NOT_ENOUGH
     assert t.loc[e2.creator[1], "ROI sul margine"] == "costo zero"
     R.fig_png(R.roi_figure(res))  # non deve fallire

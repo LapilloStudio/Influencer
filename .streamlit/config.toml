@@ -1,0 +1,33 @@
+# Creator Lift gira solo su questo computer: nessun dato deve uscire.
+# Queste opzioni sono controllate anche all'avvio da creatorlift/privacy.py.
+
+[browser]
+# niente statistiche d'uso inviate a Streamlit
+gatherUsageStats = false
+
+[server]
+# raggiungibile solo da questo computer, non dalla rete Wi-Fi del negozio
+address = "127.0.0.1"
+allowedHosts = ["localhost", "127.0.0.1"]
+# apre il browser da solo, senza chiedere l'email al primo avvio
+headless = false
+showEmailPrompt = false
+maxUploadSize = 100
+
+[client]
+# niente link "cerca l'errore su Google/ChatGPT" e niente dettagli tecnici
+showErrorLinks = false
+showErrorDetails = "none"
+toolbarMode = "viewer"
+# nessun sito esterno puo' comandare l'app dentro un riquadro
+allowedOrigins = []
+
+[logger]
+hideWelcomeMessage = true
+
+[global]
+developmentMode = false
+
+[theme]
+base = "light"
+primaryColor = "#2a78d6"

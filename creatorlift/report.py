@@ -13,15 +13,13 @@ import html
 import io
 from datetime import datetime
 
-import matplotlib
+import matplotlib.ticker
+import numpy as np
+import pandas as pd
+from matplotlib.figure import Figure  # niente pyplot: i grafici si possono creare da piu' thread
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-
-from creatorlift.io_shopify import EXCLUSION_LABELS, ShopData  # noqa: E402
-from creatorlift.model import Fit, daily_paths, estimate, verdict  # noqa: E402
+from creatorlift.io_shopify import EXCLUSION_LABELS, ShopData
+from creatorlift.model import Fit, daily_paths, estimate, verdict
 
 DEFAULT_MARGIN = 0.55
 NO_EFFECT = "nessun effetto rilevato"
@@ -99,10 +97,6 @@ def _interval(lo, hi, unit="") -> str:
     return f"tra {fmt_int(lo)} e {fmt_int(hi)}{unit}"
 
 
-def _roi_num(x) -> str:
-    return "0" if x == 0 else fmt_dec(x, 1)
-
-
 def _roi_text(x) -> str:
     return NO_EFFECT if not np.isfinite(x) or x < 0 else fmt_dec(x, 1)
 
@@ -114,24 +108,22 @@ def display_table(res: pd.DataFrame) -> pd.DataFrame:
         ok = r.estimable
         code = "senza codice" if r.orders_with_code is None or pd.isna(r.orders_with_code) else fmt_int(r.orders_with_code)
         if not ok:
-            extra, interval, roi, roi_iv = NOT_ENOUGH, NOT_ENOUGH, NOT_ENOUGH, ""
+            extra, interval, roi = NOT_ENOUGH, NOT_ENOUGH, NOT_ENOUGH
         else:
             extra = NO_EFFECT if r.incremental_orders < 0 else fmt_int(r.incremental_orders)
             interval = _interval(r.low_90, r.high_90)
             if not np.isfinite(r.roi):
-                roi, roi_iv = "costo zero", ""
+                roi = "costo zero"
             else:
                 roi = _roi_text(r.roi)
-                roi_iv = "" if r.roi_high < 0 else f"{_roi_num(max(r.roi_low, 0))} – {_roi_num(r.roi_high)}"
         rows.append({
             "Creator": r.creator,
             "Post": int(r.n_posts),
             "Ordini con codice": code,
             "Vendite in più stimate": extra,
-            "Intervallo probabile (90%)": interval,
+            "Intervallo probabile": interval,
             "Costo": fmt_eur(r.cost_eur),
             "ROI sul margine": roi,
-            "ROI, intervallo probabile": roi_iv,
             "Giudizio": r.giudizio,
         })
     return pd.DataFrame(rows)
@@ -208,7 +200,8 @@ def creator_figure(fit: Fit, data: ShopData, creator: str, before: int = 7, afte
     n = len(post_days)
     cols = min(n, 2)
     rows = int(np.ceil(n / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(8.5, 3.0 * rows + 0.7), squeeze=False, sharey=True)
+    fig = Figure(figsize=(8.5, 3.0 * rows + 0.7))
+    axes = fig.subplots(rows, cols, squeeze=False, sharey=True)
     windows = [(dates >= d0 - pd.Timedelta(days=before)) & (dates <= d0 + pd.Timedelta(days=after)) for d0 in post_days]
     ymax = max(float(np.nanmax(p.loc[w.to_numpy(), ["orders", "with_creator", "without_creator", "normal_hi"]]
                                .to_numpy(dtype=float))) for w in windows)
@@ -253,7 +246,8 @@ def roi_figure(res: pd.DataFrame):
     r = res[np.isfinite(res["roi"].astype(float)) | ~res["estimable"]].copy()
     r["_sort"] = r["roi"].fillna(-np.inf)
     r = r.sort_values("_sort", ascending=True).reset_index(drop=True)
-    fig, ax = plt.subplots(figsize=(8.5, 0.55 * len(r) + 1.3))
+    fig = Figure(figsize=(8.5, 0.55 * len(r) + 1.3))
+    ax = fig.subplots()
     fig.patch.set_facecolor(SURFACE)
     _style(ax)
     ax.grid(axis="y", visible=False)
@@ -289,7 +283,6 @@ def roi_figure(res: pd.DataFrame):
 def fig_png(fig, dpi=144) -> bytes:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, facecolor=fig.get_facecolor())
-    plt.close(fig)
     return buf.getvalue()
 
 
