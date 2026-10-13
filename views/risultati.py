@@ -79,14 +79,19 @@ if data.esclusi or (data.codici_non_assegnati is not None and len(data.codici_no
 
 st.divider()
 st.subheader("Report per il brand")
+col1, col2 = st.columns(2)
+brand = col1.text_input("Nome del brand (facoltativo)", key="brand", max_chars=80,
+                        help="Compare nella prima pagina e in alto in ogni pagina del report.")
+autore = col2.text_input("Preparato da (facoltativo)", key="autore", max_chars=80,
+                         help="Il tuo nome o quello della tua agenzia, nella prima pagina.")
 
 
-def _report(data=data, res=res, fit=fit, margine=margine, cal=cal) -> bytes:
-    return R.html_report(data, res, fit, margine, cal=cal).encode("utf-8")
+def _report(data=data, res=res, fit=fit, margine=margine, cal=cal, brand=brand, autore=autore) -> bytes:
+    return R.html_report(data, res, fit, margine, cal=cal, brand=brand, autore=autore).encode("utf-8")
 
 
 st.download_button("Scarica il report (HTML, si stampa anche in PDF)", data=_report,
                    file_name=f"creator_lift_report_{datetime.now():%Y%m%d_%H%M}.html", mime="text/html",
                    on_click="ignore", type="primary", icon="📄")
 st.caption("Il report si apre con qualsiasi browser, anche senza connessione. Per un PDF: apri il file e scegli "
-           "Stampa › Salva come PDF.")
+           "Stampa › Salva come PDF (formato A4): ogni sezione inizia su una pagina nuova, con i numeri di pagina.")

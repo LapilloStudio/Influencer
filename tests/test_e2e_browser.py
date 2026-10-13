@@ -67,7 +67,7 @@ def test_nessuna_richiesta_esterna(server, tmp_path):
         with page.expect_download(timeout=120_000) as dl:
             page.get_by_role("button", name="Scarica il report").click()
         report = Path(dl.value.path()).read_text(encoding="utf-8")
-        assert "Quanto hanno venduto davvero i creator" in report
+        assert "Quanto hanno venduto davvero i vostri creator" in report
         assert "http://" not in report and "https://" not in report
         # la pagina resta sui risultati dopo un'interazione
         page.get_by_role("heading", name="Risultati").wait_for(timeout=30_000)

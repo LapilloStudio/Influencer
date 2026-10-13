@@ -3,14 +3,14 @@
 Niente gergo statistico nei testi per l'utente: "intervallo probabile" e non
 "intervallo di confidenza", "ritorno sul margine" spiegato in euro. Un ROI
 negativo non viene mai mostrato come numero: si scrive "nessun effetto
-rilevato". I grafici sono immagini PNG (matplotlib) incorporate nel report,
-che quindi si apre anche senza connessione.
+rilevato". I grafici sono di matplotlib: PNG nell'app, SVG nel report per il
+brand (creatorlift.report_html), che si apre anche senza connessione.
 """
 from __future__ import annotations
 
-import base64
 import html
 import io
+import re
 from datetime import datetime
 
 import matplotlib
@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure  # niente pyplot: i grafici si possono creare da piu' thread
 
-from creatorlift.io_shopify import EXCLUSION_LABELS, ShopData
+from creatorlift.io_shopify import ShopData
 from creatorlift.model import Fit, daily_paths, estimate, verdict
 
 DEFAULT_MARGIN = 0.55
@@ -31,6 +31,7 @@ NOT_ENOUGH = "dati insufficienti"
 BLUE, ORANGE = "#2a78d6", "#eb6834"
 INK, INK2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
 MESI = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"]
+SVG_FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
 
 # accordo singolare/plurale: "il post ... si è ripagato", "i post ... si sono ripagati"
 VERB = {
@@ -98,12 +99,14 @@ def results(est: pd.DataFrame, data: ShopData, margin: float) -> pd.DataFrame:
     r["orders_with_code"] = r["creator"].map(data.orders_with_code)
     r["n_posts"] = r["creator"].map(data.posts.groupby("creator").size())
     r["margin_eur"] = r["incremental_orders"] * data.aov * margin
-    # prima chi rende di piu'
+    # prima chi rende di piu'; tra quelli senza un effetto chiaro prima chi e' costato di piu'
+    # (il loro ROI dipende da stime che non si distinguono dallo zero)
     rank = {g: i for i, g in enumerate(["si ripaga quasi certamente", "probabilmente si ripaga",
                                         "porta vendite (costo zero)", "porta vendite ma non si ripaga",
                                         "nessun effetto chiaro", NOT_ENOUGH])}
     r["_rank"] = r["giudizio"].map(rank)
-    r = r.sort_values(["_rank", "roi"], ascending=[True, False], na_position="last").drop(columns="_rank")
+    r["_k2"] = np.where(r["_rank"] >= rank["nessun effetto chiaro"], r["cost_eur"], r["roi"])
+    r = r.sort_values(["_rank", "_k2"], ascending=[True, False], na_position="last").drop(columns=["_rank", "_k2"])
     return r.reset_index(drop=True)
 
 
@@ -215,7 +218,11 @@ def creator_figure(fit: Fit, data: ShopData, creator: str, before: int = 7, afte
     n = len(post_days)
     cols = min(n, 2)
     rows = int(np.ceil(n / cols))
-    fig = Figure(figsize=(8.5, 3.0 * rows + 0.7))
+    # legenda nella casella vuota quando i post sono dispari (3, 5, ...), altrimenti sopra
+    legend_in_hole = n > 1 and n % 2 == 1
+    top = 0 if legend_in_hole else 0.55
+    row_h = 2.3 if rows == 1 else (1.7 if rows == 2 else 1.55)
+    fig = Figure(figsize=(6.7, row_h * rows + top + 0.1))
     axes = fig.subplots(rows, cols, squeeze=False, sharey=True)
     windows = [(dates >= d0 - pd.Timedelta(days=before)) & (dates <= d0 + pd.Timedelta(days=after)) for d0 in post_days]
     ymax = max(float(np.nanmax(p.loc[w.to_numpy(), ["orders", "with_creator", "without_creator", "normal_hi"]]
@@ -229,27 +236,38 @@ def creator_figure(fit: Fit, data: ShopData, creator: str, before: int = 7, afte
         q = p[windows[k].to_numpy()]
         x = (pd.to_datetime(q["date"]) - d0).dt.days.to_numpy()
         _style(ax)
+        ax.tick_params(labelsize=8.5, labelcolor=INK2)
         ax.fill_between(x, q["normal_lo"], q["normal_hi"], color=BLUE, alpha=0.12, linewidth=0,
                         label="variazione normale senza il creator (9 giorni su 10)")
-        ax.plot(x, q["without_creator"], color=BLUE, linewidth=2, solid_capstyle="round",
+        ax.plot(x, q["without_creator"], color=BLUE, linewidth=1.8, solid_capstyle="round",
                 label="previsione senza il creator")
-        ax.plot(x, q["with_creator"], color=ORANGE, linewidth=2, solid_capstyle="round",
+        ax.plot(x, q["with_creator"], color=ORANGE, linewidth=1.8, solid_capstyle="round",
                 label="previsione con il creator")
-        ax.plot(x, q["orders"], linestyle="none", marker="o", markersize=4.5, color=INK2,
-                markeredgecolor=SURFACE, markeredgewidth=1, label="ordini reali")
-        ax.axvline(0, color=MUTED, linewidth=1)
-        ax.set_title(f"Post del {fmt_date(d0)}", fontsize=10, color=INK, loc="left")
+        ax.plot(x, q["orders"], linestyle="none", marker="o", markersize=3.6, color=INK2,
+                markeredgecolor=SURFACE, markeredgewidth=0.8, label="ordini reali")
+        ax.axvline(0, color=INK2, linewidth=0.9)
+        ax.set_title(f"Post del {fmt_date(d0)}", fontsize=9, color=INK, loc="left", fontweight="bold", pad=6)
         ticks = [t for t in (-7, 0, 7, 14) if x.min() <= t <= x.max()]
         ax.set_xticks(ticks)
         ax.set_xticklabels([f"{t:+d} gg" if t else "giorno 0" for t in ticks])
         ax.set_ylim(0, ymax * 1.06)
         if k % cols == 0:
-            ax.set_ylabel("ordini al giorno", color=INK2, fontsize=9)
+            ax.set_ylabel("ordini al giorno", color=INK2, fontsize=8.5)
     handles, labels = axes.flat[0].get_legend_handles_labels()
     order = [3, 2, 1, 0]
-    fig.legend([handles[i] for i in order], [labels[i] for i in order], loc="upper left", ncol=2, frameon=False,
-               fontsize=9, labelcolor=INK2, bbox_to_anchor=(0.01, 1.0))
-    fig.tight_layout(rect=(0, 0, 1, 1 - 0.65 / fig.get_figheight()))
+    handles, labels = [handles[i] for i in order], [labels[i] for i in order]
+    if legend_in_hole:
+        hole = axes.flat[n]
+        hole.set_visible(True)
+        hole.axis("off")
+        hole.legend(handles, ["ordini reali", "previsione con il creator", "previsione senza il creator",
+                              "variazione normale senza il\ncreator (9 giorni su 10)"],
+                    loc="center left", frameon=False, fontsize=8.5, labelcolor=INK2, borderaxespad=0)
+        fig.tight_layout(pad=0.4)
+    else:
+        fig.legend(handles, labels, loc="upper left", ncol=2, frameon=False, fontsize=8.5, labelcolor=INK2,
+                   bbox_to_anchor=(0.0, 1.0), borderaxespad=0.3)
+        fig.tight_layout(rect=(0, 0, 1, 1 - top / fig.get_figheight()), pad=0.4)
     return fig
 
 
@@ -307,26 +325,11 @@ def fig_svg(fig) -> bytes:
     buf = io.BytesIO()
     with matplotlib.rc_context({"svg.fonttype": "none", "svg.hashsalt": "creatorlift"}):
         fig.savefig(buf, format="svg", facecolor=fig.get_facecolor(), metadata={"Date": None, "Creator": None})
-    return buf.getvalue()
+    # stesso carattere del report: quello di sistema (San Francisco, Segoe UI, Roboto...)
+    return re.sub(rb"font-family: [^;\"]*", b"font-family: " + SVG_FONT.encode(), buf.getvalue())
 
 
 # ---------------------------------------------------------------- report HTML
-
-CSS = """
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#0b0b0b;background:#f9f9f7;margin:0}
-main{max-width:960px;margin:0 auto;padding:32px 20px 64px;background:#fcfcfb}
-h1{font-size:28px;margin:0 0 4px} h2{font-size:20px;margin:36px 0 10px} h3{font-size:16px;margin:24px 0 6px}
-p,li{line-height:1.5} .muted{color:#52514e} .small{font-size:13px}
-.box{border:1px solid #e1e0d9;border-radius:8px;padding:12px 16px;margin:12px 0;background:#fff}
-.warn{border-color:#ec835a;background:#fff8f4}
-table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #e1e0d9;vertical-align:top}
-th{color:#52514e;font-weight:600} td.num{font-variant-numeric:tabular-nums}
-img{max-width:100%;height:auto;display:block;margin:6px 0 14px}
-.verdict{white-space:nowrap}
-@media print{body{background:#fff} main{padding:0} h2{break-after:avoid} img,table{break-inside:avoid}}
-"""
-
 
 def _table_html(df: pd.DataFrame) -> str:
     head = "".join(f"<th>{html.escape(str(c))}</th>" for c in df.columns)
@@ -336,78 +339,9 @@ def _table_html(df: pd.DataFrame) -> str:
     return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
-def _img(png: bytes, alt: str) -> str:
-    return f'<img alt="{html.escape(alt)}" src="data:image/png;base64,{base64.b64encode(png).decode()}">'
-
-
 def html_report(data: ShopData, res: pd.DataFrame, fit: Fit, margin: float, now: datetime | None = None,
-                cal: dict | None = None) -> str:
-    now = now or datetime.now()
-    e = html.escape
-    first, last = data.daily["date"].iloc[0], data.daily["date"].iloc[-1]
-    parts = [f"<!doctype html><html lang='it'><head><meta charset='utf-8'>"
-             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-             f"<title>Creator Lift: risultati</title><style>{CSS}</style></head><body><main>"]
-    parts.append("<h1>Quanto hanno venduto davvero i creator</h1>")
-    origine = "dati simulati" if data.origine == "simulati" else "export degli ordini di Shopify"
-    parts.append(f"<p class='muted'>Periodo {e(fmt_date(first))} – {e(fmt_date(last))} · {e(origine)} · "
-                 f"report creato il {e(fmt_date(now))}</p>")
-
-    parts.append("<h2>In breve</h2><ul>")
-    for r in res.itertuples(index=False):
-        note = code_note(r)
-        parts.append(f"<li>{e(sentence(r))}{(' ' + e(note)) if note else ''}</li>")
-    parts.append("</ul>")
-
-    avvisi = [a for a in data.avvisi if a.livello == "importante"]
-    if avvisi:
-        parts.append("<div class='box warn'><strong>Da tenere presente</strong><ul>"
-                     + "".join(f"<li>{e(a.testo)}</li>" for a in avvisi) + "</ul></div>")
-
-    parts.append("<h2>Tabella per creator</h2>")
-    parts.append(_table_html(display_table(res)))
-    parts.append(
-        f"<p class='small muted'>Le <em>vendite in più</em> sono gli ordini che non ci sarebbero stati senza i post, "
-        f"con o senza codice sconto. L'<em>intervallo probabile</em> contiene il valore vero 9 volte su 10; se parte "
-        f"da 0, il creator potrebbe non aver portato nessuna vendita in più. Il <em>ROI sul margine</em> dice quanti "
-        f"euro di margine sono tornati per ogni euro speso: sopra 1 la collaborazione si è ripagata. Calcolato con "
-        f"{e(data.aov_label)} di {e(fmt_eur(data.aov))} e margine lordo del {e(fmt_int(margin * 100))}%.</p>")
-
-    parts.append("<h2>Si sono ripagati?</h2>")
-    parts.append(_img(fig_png(roi_figure(res)), "ROI sul margine per creator con intervallo probabile"))
-    parts.append("<p class='small muted'>Il punto è la stima, la barra l'intervallo probabile. A destra della linea "
-                 "verticale il costo si è ripagato. Un cerchio vuoto sullo zero vuol dire nessun effetto rilevato.</p>")
-
-    parts.append("<h2>Giorno per giorno, attorno a ogni post</h2>")
-    parts.append("<p class='small muted'>I punti sono gli ordini reali. La linea blu è quanti ordini ci si "
-                 "aspettava senza il creator, la fascia azzurra la variazione normale da un giorno all'altro. "
-                 "La linea arancione è la previsione che tiene conto del creator: la distanza tra le due linee "
-                 "sono le vendite in più.</p>")
-    for r in res.itertuples(index=False):
-        parts.append(f"<h3>{e(r.creator)}</h3><p class='small'>{e(sentence(r))}</p>")
-        parts.append(_img(fig_png(creator_figure(fit, data, r.creator)), f"Ordini attorno ai post di {r.creator}"))
-
-    if data.truth is not None:
-        parts.append("<h2>Confronto con la verità (dati simulati)</h2>")
-        parts.append("<p class='small muted'>Nei dati simulati l'effetto vero di ogni creator è noto: qui si "
-                     "vede se la stima lo ritrova.</p>")
-        parts.append(_table_html(truth_table(res, data.truth)))
-
-    parts.append("<h2>Come è stato calcolato</h2>")
-    esclusi = "".join(f"<li>{fmt_int(v)} ordini {e(EXCLUSION_LABELS[k])}</li>" for k, v in data.esclusi.items())
-    parts.append(
-        "<p class='small'>Gli ordini di ogni giorno vengono spiegati con l'andamento del negozio, il giorno della "
-        "settimana, la stagione e i giorni di promozione. Per ogni creator si misura quanto salgono gli ordini il "
-        "giorno del post, nei 2 giorni dopo, nei giorni da 3 a 6 e da 7 a 13. Le vendite in più sono la differenza "
-        "tra gli ordini previsti con i post e quelli previsti senza. L'intervallo probabile si ottiene ripetendo il "
-        f"calcolo 2.000 volte. Dati: {fmt_int(data.n_days)} giorni, in media {fmt_dec(data.orders_per_day, 1)} "
-        "ordini al giorno.</p>")
-    if cal:
-        parts.append(f"<p class='small'>{e(calibration_text(cal))}</p>")
-    if esclusi:
-        parts.append(f"<p class='small'>Ordini non contati:</p><ul class='small'>{esclusi}</ul>")
-    info = [a for a in data.avvisi if a.livello != "importante"]
-    if info:
-        parts.append("<ul class='small muted'>" + "".join(f"<li>{e(a.testo)}</li>" for a in info) + "</ul>")
-    parts.append("</main></body></html>")
-    return "".join(parts)
+                cal: dict | None = None, brand: str | None = None, autore: str | None = None) -> str:
+    """Report per il brand (creatorlift.report_html): HTML autonomo, stampabile in PDF A4.
+    `brand` e `autore` sono facoltativi: se mancano, i campi non compaiono."""
+    from creatorlift import report_html  # report_html importa questo modulo
+    return report_html.build(data, res, fit, margin, now=now, cal=cal, brand=brand, autore=autore)

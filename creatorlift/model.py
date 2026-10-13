@@ -241,11 +241,12 @@ def daily_paths(f: Fit, creator: str, seed: int = 0) -> pd.DataFrame:
     })
 
 
-def total_incremental(f: Fit) -> dict:
+def total_incremental(f: Fit, creators=None) -> dict:
     """Vendite in piu' di tutti i creator insieme: previsione con tutti i post
     meno previsione senza nessun post, con lo stesso intervallo al 90% delle
-    stime per creator (stesse estrazioni dei coefficienti)."""
-    cols = [i for c in f.creators for i in f.creator_columns(c)]
+    stime per creator (stesse estrazioni dei coefficienti). `creators`: solo
+    questi (per esempio senza quelli con dati insufficienti)."""
+    cols = [i for c in (f.creators if creators is None else creators) for i in f.creator_columns(c)]
     Xv = f.X.values
     X0 = Xv.copy()
     X0[:, cols] = 0.0

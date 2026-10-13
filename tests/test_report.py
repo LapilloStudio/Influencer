@@ -30,8 +30,10 @@ def test_roi_uguale_al_motore(sim):
     e30 = est.set_index("creator").loc[res30.creator].reset_index()
     np.testing.assert_allclose(res30["roi"], (e30["incremental_orders"] * d.aov * 0.30 / e30["cost_eur"]).round(2))
     assert set(res30["creator"]) == set(est["creator"])
-    # ordine: prima chi si ripaga
+    # ordine: prima chi si ripaga; tra quelli senza un effetto chiaro, prima chi e' costato di piu'
     assert list(res["giudizio"])[0] == "si ripaga quasi certamente"
+    nessuno = res[res["giudizio"] == "nessun effetto chiaro"]["cost_eur"].to_numpy()
+    assert (np.diff(nessuno) <= 0).all()
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
@@ -113,14 +115,69 @@ def test_report_html_autonomo(sim):
     assert h.startswith("<!doctype html>") and "lang='it'" in h
     assert not re.search(r"(src|href)\s*=\s*['\"]?(https?:)?//", h)  # nessuna risorsa esterna
     assert "http://" not in h and "https://" not in h
-    assert h.count("data:image/png;base64,") == 1 + len(res)
+    assert h.count("data:image/svg+xml;base64,") == len(res)  # un grafico giornaliero per creator
     for c in res.creator:
         assert c in h
-    assert "Confronto con la verità" in h and "5 gen 2026" in h
-    assert "intervallo di confidenza" not in h.lower()
+    assert "Confronto con la verità" in h and "5 gennaio 2026" in h
+    # senza nome del brand e autore i campi non compaiono (mai segnaposto tra parentesi)
+    assert "Preparato per" not in h and "Preparato da" not in h and "[" not in _visible(h)
     d2 = from_simulation(20, 1)
     d2.truth = None
     assert "Confronto con la verità" not in R.html_report(d2, res, fit, 0.55)
+
+
+def _visible(h: str) -> str:
+    """Testo che il lettore vede (senza stili, tag e attributi)."""
+    import html as H
+    h = re.sub(r"<style.*?</style>", " ", h, flags=re.S)
+    return H.unescape(re.sub(r"<[^>]+>", " ", h))
+
+
+@pytest.mark.parametrize("margin", [0.2, 0.55])
+def test_report_testi_senza_gergo_e_senza_negativi(sim, margin):
+    d, est, fit = sim
+    h = R.html_report(d, R.results(est, d, margin), fit, margin, cal={"creator_finti": 300, "fattore_usato": 1.3,
+                                                                       "fattore": 1.3})
+    t = _visible(h)
+    assert not re.search(r"[-−]\s*\d", t), re.findall(r".{30}[-−]\s*\d.{10}", t)
+    for parola in ("intervallo di confidenza", "p-value", "regressione", "coefficient", "significativ", "motore",
+                   "deviazione"):
+        assert parola not in t.lower(), parola
+    assert not re.search(r"\bROI\b", t)
+    assert "allargati" in t  # la taratura e' dichiarata
+
+
+def test_report_nome_brand_e_autore(sim):
+    d, est, fit = sim
+    res = R.results(est, d, 0.55)
+    h = R.html_report(d, res, fit, 0.55, brand="<b>Rossi & figli</b>", autore="Anna")
+    assert "<b>Rossi" not in h and "&lt;b&gt;Rossi &amp; figli&lt;/b&gt;" in h
+    assert "Preparato per" in h and "Preparato da" in h and "Anna" in h
+    page_css = h[h.index("@page{"):h.index("</style>")]
+    assert "<" not in page_css  # il nome nell'intestazione di pagina non chiude lo stile
+
+
+def test_report_casi_limite(sim):
+    d, est, fit = sim
+    e2 = est.copy()
+    e2.loc[0, ["low_90", "high_90"]] = np.nan
+    e2.loc[1, "cost_eur"] = 0.0
+    h = R.html_report(d, R.results(e2, d, 0.55), fit, 0.55)
+    assert R.NOT_ENOUGH in h and "costo zero" in h
+    # un solo creator
+    res1 = R.results(est, d, 0.55).iloc[:1]
+    h1 = _visible(R.html_report(d, res1, fit, 0.55))
+    assert "1 di 1" in h1 and "di una collaborazione" in h1 and "uno creator" not in h1
+    # nessun creator con un effetto chiaro
+    e3 = est.assign(prob_effect_positive=0.5)
+    h3 = _visible(R.html_report(d, R.results(e3, d, 0.55), fit, 0.55))
+    assert "Nessuno dei" in h3 and "Per tutti e sei i creator" in h3
+
+
+def test_ritorno_sotto_1_mai_arrotondato_a_1():
+    from creatorlift.report_html import fmt_roi, roi_range
+    assert fmt_roi(0.96) == "0,96" and fmt_roi(0.94) == "0,9" and fmt_roi(1.0) == "1,0" and fmt_roi(7.33) == "7,3"
+    assert roi_range(-0.5, 0.96) == "tra 0 e 0,96"
 
 
 def test_nomi_con_caratteri_speciali_nel_report(sim):
@@ -147,3 +204,4 @@ def test_grafico_svg_autonomo(sim):
     assert svg.lstrip().startswith("<?xml") and "<svg" in svg
     assert "<dc:date>" not in svg and "matplotlib.org" not in svg
     assert "<text" in svg  # testo vero, non tracciati
+    assert "system-ui" in svg and "DejaVu" not in svg  # stesso carattere del report

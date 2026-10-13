@@ -50,7 +50,7 @@ Dopo il caricamento la pagina mostra gli avvisi importanti, per esempio se lo st
 - **Giorno per giorno**: per il creator scelto, gli ordini reali attorno a ogni post, la previsione senza il creator con la fascia di variazione normale, e la previsione con il creator.
 - **Confronto con la verità** (solo con i dati simulati): effetto vero accanto alla stima e al conteggio degli ordini con codice.
 - **Dettagli sui dati**: ordini non contati e perché, codici sconto usati che non appartengono a nessun creator.
-- **Report per il brand**: un file HTML in italiano semplice, con le frasi, la tabella e i grafici. Si apre con qualsiasi browser anche senza connessione; per un PDF si usa *Stampa › Salva come PDF*.
+- **Report per il brand**: un documento HTML in italiano semplice, pronto da stampare in PDF (A4, numeri di pagina): sintesi con i numeri della campagna e cosa suggeriamo, ritorno per creator, una pagina per creator, dati e metodo. Si apre con qualsiasi browser anche senza connessione. Esempio in `demo/report_esempio.pdf`.
 
 ## Come vengono letti i file di Shopify
 
@@ -97,7 +97,8 @@ Il test `tests/test_e2e_browser.py` avvia l'app vera, la usa con Chromium (dati 
 | `creatorlift/model.py` | Il motore di stima (vedi sotto). |
 | `creatorlift/simulate.py` | Il simulatore di negozi con effetto vero noto, e l'esportazione nel formato di Shopify. |
 | `creatorlift/io_shopify.py` | Lettura di ordini Shopify, post e promozioni; tabella giornaliera e avvisi. |
-| `creatorlift/report.py` | Tabella, frasi, grafici e report HTML. |
+| `creatorlift/report.py` | Tabella, frasi e grafici. |
+| `creatorlift/report_html.py`, `report_style.py` | Report per il brand (HTML autonomo, stampabile A4). |
 | `creatorlift/privacy.py`, `creatorlift/ui.py` | Controlli di privacy e funzioni comuni alle pagine. |
 | `estimate.py`, `simulate.py` | I comandi del prototipo, che funzionano come prima. |
 | `run_tests.py` | Ripete simulazione e stima su molti negozi per 3 dimensioni (5, 20, 80 ordini al giorno). |

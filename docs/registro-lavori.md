@@ -67,6 +67,19 @@ Nessuno cambia il metodo; sui dati simulati i numeri restano identici al prototi
 - **Pagina per togliere i dati personali** dall'export Shopify (`strumenti/pulisci_export_shopify.html`): si apre con un doppio clic, lavora senza connessione; verificata in Chromium (l'app legge dal file pulito gli stessi ordini dell'originale).
 - **Messaggi per brand e agenzie pilota** ([Messaggi per i pilota](messaggi-pilota.md)).
 
+## Report per il brand rifatto
+
+Il primo report era una pagina web semplice: titoli, elenco di frasi, tabella e immagini. Tre proposte di grafica diverse (stile consulenza, editoriale, prodotto) sono state valutate da tre revisori distinti (titolare di un negozio, grafico, controllo dei numeri). Base scelta: stile consulenza, con le parti migliori delle altre due.
+- Prima pagina con la risposta: numeri chiave della campagna (con intervallo), *Il punto*, *Cosa suggeriamo*.
+- **Pareggio in ordini** per ogni creator e linea che confronta vendite in più, ordini con codice e pareggio.
+- Grafico del ritorno con zona sotto il pareggio e giudizi sotto il nome; tabella con una sola cella "nessun effetto rilevato" per riga.
+- Grafici giorno per giorno in SVG con il carattere del documento; legenda nella casella vuota con 3 post.
+- A4 con intestazioni e numeri di pagina; a schermo stretto tabelle a schede e grafici scorrevoli.
+- Nome del brand e autore facoltativi dall'app (mai segnaposto tra parentesi).
+- Correzioni chieste dai revisori: un ritorno sotto 1 non viene mai scritto "1,0" (0,96 resta 0,96); tra i creator senza effetto chiaro prima chi è costato di più (prima l'ordine dipendeva da stime indistinguibili da zero); frasi sul codice sconto che non presentano gli ordini con codice come parte delle vendite in più.
+
+Il metodo di stima non cambia. Unica aggiunta al motore: `total_incremental` accetta l'elenco dei creator da sommare.
+
 ## Cose da fare
 
 - Provare l'app con **un export reale di un negozio italiano** (IVA inclusa, ordini con più codici, un annullato, un rimborso parziale) e aggiungerlo ai test.

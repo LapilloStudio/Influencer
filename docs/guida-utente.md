@@ -103,7 +103,17 @@ Effetto vero accanto alla stima, all'intervallo e agli ordini con codice, e quan
 Quanti ordini non sono stati contati e perché, e i codici sconto usati che non appartengono a nessun creator dell'elenco (utile per scoprire codici dimenticati).
 
 ### Report per il brand
-*Scarica il report* produce un file HTML in italiano semplice con frasi, tabella, grafici e una spiegazione del calcolo. Si apre con qualsiasi browser anche senza connessione; per un PDF: aprirlo e scegliere *Stampa › Salva come PDF*.
+Prima di scaricarlo si possono scrivere il **nome del brand** e **chi l'ha preparato** (facoltativi: se restano vuoti, quei campi non compaiono). *Scarica il report* produce un file HTML che si apre con qualsiasi browser anche senza connessione; per un PDF: aprirlo e scegliere *Stampa › Salva come PDF* (A4). Ogni sezione inizia su una pagina nuova, con i numeri di pagina.
+
+Cosa contiene (con 6 creator sono 10 pagine, 11 con i dati simulati):
+1. **Sintesi**: quattro numeri chiave (ordini in più di tutta la campagna con il loro intervallo, spesa, margine tornato per ogni euro speso, quanti creator si sono ripagati), *Il punto* in poche frasi e *Cosa suggeriamo* (rinnovare, fare un'altra prova, rinegoziare, rivedere), dedotto dai giudizi.
+2. **Si sono ripagati?**: grafico del ritorno per creator con la linea del pareggio e la tabella riassuntiva con il totale.
+3. **Come leggere le schede**: un grafico d'esempio spiegato, le parole del report e i giudizi.
+4. **Una pagina per creator**: frase, numeri, *pareggio* in ordini (quante vendite in più servivano per ripagare il costo), confronto tra vendite in più, ordini con codice e pareggio, grafico giorno per giorno, cosa mostra il grafico, cosa dice il codice sconto e cosa suggeriamo.
+5. **Dati e metodo**: numeri di base, ordini non contati, controllo di affidabilità, come funziona, limiti.
+6. Solo con i dati simulati: **confronto con la verità**.
+
+Un esempio già pronto è in `demo/report_esempio.html` e `.pdf` (si rigenera con `python scripts/report_esempio.py`).
 
 ## Provare con file in formato Shopify senza un negozio vero
 
