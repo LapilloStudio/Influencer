@@ -130,3 +130,20 @@ def test_nomi_con_caratteri_speciali_nel_report(sim):
     t = R._table_html(R.display_table(res))
     assert "<b>Niccolò" not in t and "&lt;b&gt;Niccolò &amp; co&lt;/b&gt;" in t
     assert h
+
+
+def test_totale_campagna_coerente(sim):
+    from creatorlift.model import total_incremental
+    d, est, fit = sim
+    t = total_incremental(fit)
+    assert t["low_90"] <= t["incremental_orders"] <= t["high_90"]
+    # con effetti piccoli il totale e' quasi la somma delle stime per creator
+    assert abs(t["incremental_orders"] - est["incremental_orders"].sum()) < 0.02 * abs(est["incremental_orders"].sum()) + 2
+
+
+def test_grafico_svg_autonomo(sim):
+    d, est, fit = sim
+    svg = R.fig_svg(R.creator_figure(fit, d, est.creator.iloc[0])).decode()
+    assert svg.lstrip().startswith("<?xml") and "<svg" in svg
+    assert "<dc:date>" not in svg and "matplotlib.org" not in svg
+    assert "<text" in svg  # testo vero, non tracciati

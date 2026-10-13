@@ -13,6 +13,7 @@ import html
 import io
 from datetime import datetime
 
+import matplotlib
 import matplotlib.ticker
 import numpy as np
 import pandas as pd
@@ -297,6 +298,15 @@ def roi_figure(res: pd.DataFrame):
 def fig_png(fig, dpi=144) -> bytes:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, facecolor=fig.get_facecolor())
+    return buf.getvalue()
+
+
+def fig_svg(fig) -> bytes:
+    """Grafico vettoriale per il report: nitido a qualsiasi ingrandimento e nel
+    PDF; il testo resta testo (font di sistema), senza data ne' riferimenti."""
+    buf = io.BytesIO()
+    with matplotlib.rc_context({"svg.fonttype": "none", "svg.hashsalt": "creatorlift"}):
+        fig.savefig(buf, format="svg", facecolor=fig.get_facecolor(), metadata={"Date": None, "Creator": None})
     return buf.getvalue()
 
 

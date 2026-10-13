@@ -241,6 +241,23 @@ def daily_paths(f: Fit, creator: str, seed: int = 0) -> pd.DataFrame:
     })
 
 
+def total_incremental(f: Fit) -> dict:
+    """Vendite in piu' di tutti i creator insieme: previsione con tutti i post
+    meno previsione senza nessun post, con lo stesso intervallo al 90% delle
+    stime per creator (stesse estrazioni dei coefficienti)."""
+    cols = [i for c in f.creators for i in f.creator_columns(c)]
+    Xv = f.X.values
+    X0 = Xv.copy()
+    X0[:, cols] = 0.0
+    beta = f.res.params.values
+    with np.errstate(over="ignore", invalid="ignore"):
+        incr = (np.exp(Xv @ f.draws.T) - np.exp(X0 @ f.draws.T)).sum(axis=0)
+        point = float((np.exp(Xv @ beta) - np.exp(X0 @ beta)).sum())
+        lo, hi = np.percentile(incr, [5, 95])
+    return {"incremental_orders": point, "low_90": float(lo), "high_90": float(hi),
+            "prob_effect_positive": float((incr > 0).mean())}
+
+
 def verdict(row) -> str:
     if row["prob_effect_positive"] < 0.95:
         return "nessun effetto chiaro"
