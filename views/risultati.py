@@ -15,11 +15,14 @@ if "data" not in st.session_state:
     st.stop()
 
 data, est, fit, data_id = (st.session_state[k] for k in ("data", "est", "fit", "data_id"))
+cal = st.session_state.get("cal")
 first, last = data.daily["date"].iloc[0], data.daily["date"].iloc[-1]
 origine = "dati simulati" if data.origine == "simulati" else "export Shopify"
 st.caption(f"{R.fmt_date(first)} – {R.fmt_date(last)} · {data.n_days} giorni · "
            f"{R.fmt_dec(data.orders_per_day, 1)} ordini al giorno · {origine}")
 show_avvisi(data.avvisi, only_important=True)
+if cal:
+    st.caption(R.calibration_text(cal))
 
 margine = st.slider("Margine lordo sul venduto", min_value=5, max_value=95, value=55, step=1, format="%d%%",
                     key="margine",
@@ -78,8 +81,8 @@ st.divider()
 st.subheader("Report per il brand")
 
 
-def _report(data=data, res=res, fit=fit, margine=margine) -> bytes:
-    return R.html_report(data, res, fit, margine).encode("utf-8")
+def _report(data=data, res=res, fit=fit, margine=margine, cal=cal) -> bytes:
+    return R.html_report(data, res, fit, margine, cal=cal).encode("utf-8")
 
 
 st.download_button("Scarica il report (HTML, si stampa anche in PDF)", data=_report,

@@ -45,10 +45,12 @@ if fonte == "File del negozio (Shopify)":
 
     if st.button("Analizza", type="primary", disabled=not (ordini and post)):
         try:
-            with st.spinner("Leggo i file e calcolo le stime…"):
+            with st.spinner("Leggo i file…"):
                 data = load_shopify([(f.name, f.getvalue()) for f in ordini], post.getvalue(),
                                     promo.getvalue() if promo else None, include_zero=zero, include_test=prova)
-                set_data(data)
+            barra = st.progress(0.0, text="Controllo l'affidabilità con creator inventati (meno di un minuto)…")
+            set_data(data, progress=lambda x: barra.progress(x, text="Controllo l'affidabilità con creator "
+                                                                     "inventati (meno di un minuto)…"))
         except ErroreDati as e:
             clear_data()
             st.error(str(e), icon="🚫")
@@ -71,8 +73,10 @@ else:
         seme = st.number_input("Seed (cambia per ottenere un altro negozio)", min_value=0, max_value=100_000,
                                value=1, step=1, key="sim_seed")
     if st.button("Usa dati simulati", type="primary"):
-        with st.spinner("Creo i dati e calcolo le stime…"):
-            set_data(from_simulation(float(per_giorno), int(seme)))
+        barra = st.progress(0.0, text="Creo i dati e controllo l'affidabilità (meno di un minuto)…")
+        set_data(from_simulation(float(per_giorno), int(seme)),
+                 progress=lambda x: barra.progress(x, text="Creo i dati e controllo l'affidabilità (circa un "
+                                                          "minuto)…"))
         st.switch_page("views/risultati.py")
 
 if "data" in st.session_state:

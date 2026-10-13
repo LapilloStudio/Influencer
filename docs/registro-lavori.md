@@ -58,11 +58,12 @@ Nessuno cambia il metodo; sui dati simulati i numeri restano identici al prototi
 1. **Colonne del creator per nome esatto** invece che per prefisso (correzione di un difetto del prototipo con nomi simili).
 2. **Colonna delle promozioni** inclusa solo se c'è almeno un giorno di promozione: tutta a zero rendeva il modello singolare. Stime puntuali identiche; gli intervalli cambiano di qualche ordine solo per il diverso uso dei numeri casuali.
 3. **Creator con esattamente le stesse date di post stimati insieme** (`A + B`, costi sommati), perché il modello non può separarli.
-4. **Grafico giorno per giorno**: la fascia mostrata è la variazione normale di un giorno, non solo l'incertezza dei coefficienti, perché è quella con cui si confrontano i singoli giorni.
+4. **Taratura con i post finti** al caricamento dei dati: intervalli allargati del fattore misurato sul negozio (≥ 1).
+5. **Grafico giorno per giorno**: la fascia mostrata è la variazione normale di un giorno, non solo l'incertezza dei coefficienti, perché è quella con cui si confrontano i singoli giorni.
 
 ## Fase 1 di validazione
 
-- **Prova dei post finti su ordini reali pubblici** (`creatorlift/placebo.py`, `scripts/prova_dati_pubblici.py`): sul negozio vero il motore dà il 10% di falsi positivi invece del 5% e l'intervallo contiene lo zero solo nel 72% dei casi invece del 90%. Causa: scarti correlati da un giorno all'altro, assenti nei dati simulati. Newey-West peggiora; una taratura con i post finti sul negozio stesso funziona. **Non applicata: serve una decisione** (vedi [Prova dei post finti](prova-post-finti.md)).
+- **Prova dei post finti su ordini reali pubblici** (`creatorlift/placebo.py`, `scripts/prova_dati_pubblici.py`): sul negozio vero il motore dà il 10% di falsi positivi invece del 5% e l'intervallo contiene lo zero solo nel 72% dei casi invece del 90%. Causa: scarti correlati da un giorno all'altro, assenti nei dati simulati. Newey-West peggiora; una taratura con i post finti sul negozio stesso funziona. Su decisione del titolare la taratura (solo per allargare) è stata **aggiunta all'app**: sul negozio reale riporta i falsi positivi dal 10-13% al 5,5-6,7% (vedi [Prova dei post finti](prova-post-finti.md)).
 - **Pagina per togliere i dati personali** dall'export Shopify (`strumenti/pulisci_export_shopify.html`): si apre con un doppio clic, lavora senza connessione; verificata in Chromium (l'app legge dal file pulito gli stessi ordini dell'originale).
 - **Messaggi per brand e agenzie pilota** ([Messaggi per i pilota](messaggi-pilota.md)).
 

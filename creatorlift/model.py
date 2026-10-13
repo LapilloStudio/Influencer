@@ -116,7 +116,9 @@ class Fit:
         return X0
 
 
-def fit_and_draw(daily: pd.DataFrame, posts: pd.DataFrame, seed: int = 0, mode="windows") -> Fit:
+def fit_and_draw(daily: pd.DataFrame, posts: pd.DataFrame, seed: int = 0, mode="windows", widen: float = 1.0) -> Fit:
+    """`widen` > 1 allarga l'incertezza dei coefficienti di quel fattore (taratura
+    con i post finti, vedi creatorlift.placebo): le stime puntuali non cambiano."""
     if mode == "windows":
         res, X, creators = fit(daily, posts, None)
         hl = "finestre 0 / 1-2 / 3-6 / 7-13 giorni"
@@ -133,13 +135,15 @@ def fit_and_draw(daily: pd.DataFrame, posts: pd.DataFrame, seed: int = 0, mode="
     beta = res.params.values
     cov = res.cov_params().values
     draws = rng.multivariate_normal(beta, cov, size=N_DRAWS)
+    if widen != 1.0:
+        draws = beta + widen * (draws - beta)
     return Fit(res, X, creators, hl, draws, daily["date"].reset_index(drop=True),
                daily["orders"].to_numpy())
 
 
 def estimate(daily: pd.DataFrame, posts: pd.DataFrame, seed: int = 0, aov=None, margin=None, mode="windows",
-             return_fit=False):
-    f = fit_and_draw(daily, posts, seed=seed, mode=mode)
+             return_fit=False, widen: float = 1.0):
+    f = fit_and_draw(daily, posts, seed=seed, mode=mode, widen=widen)
     res, X, creators, hl, draws = f.res, f.X, f.creators, f.shape, f.draws
     beta = res.params.values
     Xv = X.values

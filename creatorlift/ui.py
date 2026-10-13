@@ -8,6 +8,7 @@ import streamlit as st
 
 from creatorlift import report as R
 from creatorlift.io_shopify import ShopData
+from creatorlift.placebo import calibrate
 
 POSTS_TEMPLATE = (
     "creator;data_post;costo_eur;codice_sconto\n"
@@ -33,17 +34,19 @@ def fingerprint(data: ShopData) -> str:
     return h.hexdigest()[:16]
 
 
-def set_data(data: ShopData):
-    """Esegue il motore una volta e tiene tutto nella sessione."""
-    est, shape, fit = R.analyze(data, seed=0)
+def set_data(data: ShopData, progress=None):
+    """Taratura con i post finti, poi il motore una volta; tutto nella sessione."""
+    cal = calibrate(data.daily, data.posts, progress=progress)
+    est, shape, fit = R.analyze(data, seed=0, widen=cal["fattore_usato"])
     st.session_state["data"] = data
     st.session_state["est"] = est
     st.session_state["fit"] = fit
-    st.session_state["data_id"] = fingerprint(data)
+    st.session_state["cal"] = cal
+    st.session_state["data_id"] = fingerprint(data) + f"-{cal['fattore_usato']:.4f}"
 
 
 def clear_data():
-    for k in ("data", "est", "fit", "data_id"):
+    for k in ("data", "est", "fit", "cal", "data_id"):
         st.session_state.pop(k, None)
     creator_png.clear()
 

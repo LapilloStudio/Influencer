@@ -49,20 +49,21 @@ def thin(daily: pd.DataFrame, orders_per_day: float, rng: np.random.Generator) -
 
 
 def _one(args):
-    daily, real_posts, rep, n_creators, posts_per_creator, seed = args
+    daily, real_posts, rep, n_creators, posts_per_creator, seed, widen = args
     rng = np.random.default_rng([seed, rep])
     fake = fake_posts(daily, rng, n_creators, posts_per_creator)
     posts = fake if real_posts is None else pd.concat([real_posts[["creator", "date", "cost_eur"]], fake])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        est, _ = estimate(daily, posts, seed=seed * 100_000 + rep)
+        est, _ = estimate(daily, posts, seed=seed * 100_000 + rep, widen=widen)
     est = est[est["creator"].isin(set(fake["creator"]))].copy()
     est["rep"] = rep
     return est
 
 
 def placebo(daily: pd.DataFrame, n_rep: int = 100, n_creators: int = 6, posts_per_creator=(1, 3),
-            seed: int = 0, workers: int | None = None, posts: pd.DataFrame | None = None) -> pd.DataFrame:
+            seed: int = 0, workers: int | None = None, posts: pd.DataFrame | None = None,
+            widen: float = 1.0) -> pd.DataFrame:
     """Una riga per creator finto, con la stima e due colonne:
     falso_positivo (effetto 'chiaro' che non esiste) e zero_dentro
     (l'intervallo contiene lo zero). `posts`: i post veri del negozio, che
@@ -71,7 +72,7 @@ def placebo(daily: pd.DataFrame, n_rep: int = 100, n_creators: int = 6, posts_pe
     daily = daily.reset_index(drop=True)
     if "promo" not in daily:
         daily = daily.assign(promo=0)
-    jobs = [(daily, posts, r, n_creators, posts_per_creator, seed) for r in range(n_rep)]
+    jobs = [(daily, posts, r, n_creators, posts_per_creator, seed, widen) for r in range(n_rep)]
     if workers == 1:
         parts = [_one(j) for j in jobs]
     else:
@@ -103,6 +104,36 @@ def summary(res: pd.DataFrame) -> dict:
             "falsi_positivi": fp, "falsi_positivi_margine": se(fp),
             "zero_nell_intervallo": cov, "zero_nell_intervallo_margine": se(cov),
             "fattore": inflation_factor(res)}
+
+
+CALIBRATION_REPS = 50
+
+
+def calibrate(daily: pd.DataFrame, posts: pd.DataFrame, n_rep: int = CALIBRATION_REPS, seed: int = 0,
+              workers: int | None = 1, progress=None) -> dict:
+    """Taratura dell'incertezza sul negozio: prova dei post finti con i post
+    veri nel modello. Il fattore si usa solo per allargare (minimo 1): la sua
+    stima su un solo negozio oscilla, e sotto 1 il motore e' gia' prudente."""
+    if progress is None:
+        res = placebo(daily, n_rep=n_rep, seed=seed, workers=workers, posts=posts)
+    else:  # una prova alla volta, per mostrare l'avanzamento
+        parts = []
+        for k in range(n_rep):
+            parts.append(placebo_one(daily, posts, k, seed))
+            progress((k + 1) / n_rep)
+        res = pd.concat(parts, ignore_index=True)
+        res["falso_positivo"] = res["prob_effect_positive"] >= 0.95
+        res["zero_dentro"] = (res["low_90"] <= 0) & (res["high_90"] >= 0)
+    s = summary(res)
+    s["fattore_usato"] = max(1.0, s["fattore"])
+    return s
+
+
+def placebo_one(daily, posts, rep, seed=0, n_creators=6, posts_per_creator=(1, 3)):
+    daily = daily.reset_index(drop=True)
+    if "promo" not in daily:
+        daily = daily.assign(promo=0)
+    return _one((daily, posts, rep, n_creators, posts_per_creator, seed, 1.0))
 
 
 def main(argv=None):

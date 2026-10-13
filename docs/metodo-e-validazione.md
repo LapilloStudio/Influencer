@@ -8,6 +8,7 @@ Il metodo statistico è quello del prototipo originale e non è stato cambiato. 
 2. **Effetto di ogni creator**: quattro finestre dopo ogni post (giorno 0, giorni 1-2, 3-6, 7-13), ciascuna con il suo coefficiente. Ogni creator ha così la sua forma di effetto, rapida o lenta.
 3. **Vendite in più** di un creator = somma su tutti i giorni di (ordini previsti con i suoi post − ordini previsti con le sue finestre azzerate).
 4. **Incertezza**: 2.000 estrazioni dei coefficienti dalla loro distribuzione (normale multivariata con la covarianza stimata); per ognuna si ricalcolano le vendite in più. L'intervallo probabile al 90% va dal 5° al 95° percentile.
+4b. **Taratura** (solo nell'app): le estrazioni vengono allargate attorno alla stima del fattore misurato con i post finti sul negozio (`widen`, minimo 1).
 5. **Probabilità di effetto positivo**: quota delle 2.000 estrazioni con vendite in più > 0.
 
 Esiste anche una variante alternativa (`mode="halflife"`, decadimento con metà vita comune scelta tra 0,5 e 6 giorni) che l'app non usa.
@@ -82,7 +83,7 @@ Il test pytest usa i seed fissi 0-29 (copertura 91,1%, falsi positivi 3,3%), qui
 
 ## Su dati reali
 
-Su un negozio vero (dati pubblici) la prova dei post finti mostra intervalli **troppo stretti**: circa il 10% di falsi positivi invece del 5% a 65 ordini al giorno. Dettagli, causa e correzione proposta in [Prova dei post finti](prova-post-finti.md).
+Su un negozio vero (dati pubblici) la prova dei post finti mostra intervalli **troppo stretti**: circa il 10% di falsi positivi invece del 5% a 65 ordini al giorno. Per questo l'app fa una **taratura** al caricamento dei dati: prova con 300 creator finti sul negozio stesso e, se serve, allarga gli intervalli del fattore misurato (mai li restringe). Dettagli e verifica in [Prova dei post finti](prova-post-finti.md).
 
 ## Limiti
 

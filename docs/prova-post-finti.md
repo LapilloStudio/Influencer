@@ -70,15 +70,30 @@ Si fa la prova dei post finti sui dati del negozio (con i suoi post veri nel mod
 
 Sui negozi simulati (post veri nel modello) il fattore misurato è tra 0,76 e 1,01, con falsi positivi tra 1,5% e 7,1%: il motore è già tarato. La stima del fattore su un singolo negozio oscilla, quindi andrebbe usata solo per **allargare** (fattore minimo 1), mai per restringere: sui dati simulati non cambierebbe quasi nulla.
 
-## Cosa cambierebbe adottando la taratura
+## Decisione: taratura adottata
 
-È un cambiamento del metodo: **non è stato applicato**, serve una decisione.
+Su decisione del titolare del progetto la taratura è stata aggiunta (solo per allargare). Come funziona nell'app:
+- al caricamento dei dati si fa la prova con 50 × 6 = 300 creator finti, con i post veri nel modello (circa 15 secondi);
+- il fattore misurato, se maggiore di 1, allarga l'incertezza dei coefficienti (`estimate(..., widen=k)`): intervalli, probabilità, giudizi e fasce dei grafici cambiano insieme; le stime puntuali no;
+- l'app e il report dicono con una frase se e di quanto gli intervalli sono stati allargati.
+
+Verifica sul negozio reale (`scripts/verifica_taratura.py`): fattore misurato come fa l'app, poi nuova prova con creator finti diversi.
+
+| Negozio | Fattore | Effetto "chiaro": prima → dopo (atteso 5%) | Zero nell'intervallo: prima → dopo (atteso 90%) |
+| --- | --- | --- | --- |
+| vero, 65/g | 1,51 | 12,8% → 5,5% | 72,0% → 88,3% |
+| 20/g | 1,25 | 9,8% → 6,2% | 79,3% → 88,5% |
+| 10/g | 1,18 | 9,9% → 6,7% | 81,5% → 88,4% |
+
+Sui dati simulati il fattore resta intorno a 1 (per esempio 0,82 → usato 1,00; 1,03), quindi i risultati praticamente non cambiano. `run_tests.py` e i test di calibrazione misurano il motore senza taratura e restano identici.
+
+## Cosa cambia con la taratura
 
 - **Stime puntuali**: identiche.
 - **Intervalli**: più larghi sui dati veri (su questo negozio di circa il 60% a 65 ordini al giorno, del 30% a 10-20).
 - **Giudizi**: meno creator con "effetto chiaro" e "si ripaga quasi certamente". Su questo negozio i falsi positivi scenderebbero dal 10% a circa il 2-4%. I creator deboli, già difficili da vedere, lo diventerebbero ancora di più.
 - **Test sui simulati**: praticamente invariati (fattore ≤ 1 → nessun allargamento).
-- **Tempo**: la taratura richiede circa 100 stime in più per negozio, cioè circa un minuto al caricamento dei dati.
+- **Tempo**: circa 300 creator finti in più per negozio, circa 15 secondi al caricamento dei dati.
 
 ## Limiti di questa prova
 

@@ -61,11 +61,25 @@ def fmt_date(d) -> str:
 
 # ---------------------------------------------------------------- calcolo
 
-def analyze(data: ShopData, seed: int = 0):
-    """Esegue il motore una volta; il margine si applica dopo (`results`)."""
+def analyze(data: ShopData, seed: int = 0, widen: float = 1.0):
+    """Esegue il motore una volta; il margine si applica dopo (`results`).
+    `widen`: fattore di taratura (creatorlift.placebo.calibrate)."""
     est, shape, fit = estimate(data.daily, data.posts, seed=seed, aov=data.aov, margin=DEFAULT_MARGIN,
-                               return_fit=True)
+                               return_fit=True, widen=widen)
     return est, shape, fit
+
+
+def calibration_text(cal: dict | None) -> str:
+    """Una frase sulla taratura, per l'app e il report."""
+    if not cal:
+        return ""
+    n = fmt_int(cal["creator_finti"])
+    if cal["fattore_usato"] > 1.0:
+        return (f"Controllo di affidabilità: con {n} creator inventati, su questo negozio il calcolo era troppo "
+                f"sicuro di sé, quindi gli intervalli sono stati allargati di {fmt_dec(cal['fattore_usato'], 2)} "
+                "volte. I giudizi sono di conseguenza più prudenti.")
+    return (f"Controllo di affidabilità: con {n} creator inventati, su questo negozio gli intervalli si sono "
+            "dimostrati affidabili e non sono stati modificati.")
 
 
 def results(est: pd.DataFrame, data: ShopData, margin: float) -> pd.DataFrame:
@@ -316,7 +330,8 @@ def _img(png: bytes, alt: str) -> str:
     return f'<img alt="{html.escape(alt)}" src="data:image/png;base64,{base64.b64encode(png).decode()}">'
 
 
-def html_report(data: ShopData, res: pd.DataFrame, fit: Fit, margin: float, now: datetime | None = None) -> str:
+def html_report(data: ShopData, res: pd.DataFrame, fit: Fit, margin: float, now: datetime | None = None,
+                cal: dict | None = None) -> str:
     now = now or datetime.now()
     e = html.escape
     first, last = data.daily["date"].iloc[0], data.daily["date"].iloc[-1]
@@ -377,6 +392,8 @@ def html_report(data: ShopData, res: pd.DataFrame, fit: Fit, margin: float, now:
         "tra gli ordini previsti con i post e quelli previsti senza. L'intervallo probabile si ottiene ripetendo il "
         f"calcolo 2.000 volte. Dati: {fmt_int(data.n_days)} giorni, in media {fmt_dec(data.orders_per_day, 1)} "
         "ordini al giorno.</p>")
+    if cal:
+        parts.append(f"<p class='small'>{e(calibration_text(cal))}</p>")
     if esclusi:
         parts.append(f"<p class='small'>Ordini non contati:</p><ul class='small'>{esclusi}</ul>")
     info = [a for a in data.avvisi if a.livello != "importante"]
