@@ -98,6 +98,7 @@ Il test `tests/test_e2e_browser.py` avvia l'app vera, la usa con Chromium (dati 
 | `creatorlift/simulate.py` | Il simulatore di negozi con effetto vero noto, e l'esportazione nel formato di Shopify. |
 | `creatorlift/io_shopify.py` | Lettura di ordini Shopify, post e promozioni; tabella giornaliera e avvisi. |
 | `creatorlift/report.py` | Tabella, frasi e grafici. |
+| `creatorlift/contatori.py` | Lettura facoltativa dei contatori dei post TikTok (vedi docs/contatori-social.md). |
 | `creatorlift/report_html.py`, `report_style.py` | Report per il brand (HTML autonomo, stampabile A4). |
 | `creatorlift/privacy.py`, `creatorlift/ui.py` | Controlli di privacy e funzioni comuni alle pagine. |
 | `estimate.py`, `simulate.py` | I comandi del prototipo, che funzionano come prima. |
