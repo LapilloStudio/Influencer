@@ -19,3 +19,13 @@ Facoltativo: serve per rapporti come "vendite in più ogni 1.000 visualizzazioni
 - Tariffa vista sul servizio: 1,50 $ ogni 1.000 record, cioè circa 0,0015 $ a lettura di un post. 10 post letti ogni ora per 14 giorni: circa 5 $.
 - Lo script è stato provato solo sul file restituito dal servizio, non con chiamate reali (la rete di sviluppo le blocca). Se le chiamate falliscono, controlla l'identificativo del dataset (`--dataset`) e gli errori mostrati.
 - Il fornitore raccoglie dati pubblici senza autorizzazione della piattaforma: usalo per prove sui pilota. Prima di metterlo in un prodotto a pagamento servono le garanzie scritte e un parere legale (origine dei dati, responsabilità, GDPR).
+
+# Quali brand pagano creator (`creatorlift/brand_adv.py`)
+
+Serve a trovare clienti possibili con dati veri: dai post #adv raccolti si contano, per ogni brand citato, i post a pagamento, i creator diversi e le settimane diverse. Un brand con più creator e più settimane paga collaborazioni in modo ricorrente.
+
+1. Su Bright Data: TikTok - Posts › **Discover by keyword**, parola chiave `#adv` (poi anche `adv`, `#ad`, `#collaborazione`), con un limite di record (per esempio 300, circa 0,45 $). Scarica il JSON dalla scheda Snapshots.
+2. `python -m creatorlift.brand_adv post_adv.json --out brand_adv.csv` (più file insieme: elencali tutti; `--regione ""` per non filtrare l'Italia).
+3. Controlla a mano la lista: un hashtag non è sempre un brand.
+
+Si salvano solo nomi di account pubblici e numeri, non testi né commenti.
